@@ -4,9 +4,11 @@
    · Sheets → Google Planilhas via Apps Script (backend/apps-script/Code.gs).
               O localStorage continua sendo a fonte do app (rápido e offline);
               cada alteração é enviada para a planilha alguns segundos depois (Sync).
-   Sessão do aparelho: forja.session = { token, user: { id, email, name, plan, createdAt, account }, at }
+   Sessão do aparelho: forja.session = { token, user: { id, email, name, plan, createdAt, emailVerified, account }, at }
    · user.account vem do servidor (tipoConta, origemPremium, academia, assinaturaIndividual...).
-     O que fica no localStorage é só cache: o servidor recalcula tudo a cada abertura (refresh). */
+     O que fica no localStorage é só cache: o servidor recalcula tudo a cada abertura (refresh).
+   · user.emailVerified === false: conta nova que ainda não tocou no link do e-mail. O servidor recusa
+     os dados dela (email_not_verified) até confirmar; o app só mostra a tela "Confirme seu e-mail". */
 (function (global) {
   'use strict';
   const CFG = global.FORJA_CONFIG || {};
@@ -95,6 +97,15 @@
     academy_already: 'Você já faz parte desta academia.',
     academy_other: 'Você já está vinculado a outra academia. Saia dela antes de entrar em uma nova.',
     not_in_academy: 'Você não está vinculado a nenhuma academia.',
+    password_mismatch: 'As senhas não são iguais.',
+    email_not_verified: 'Confirme seu e-mail para continuar.',
+    email_already_verified: 'Este e-mail já foi confirmado.',
+    email_same: 'Este já é o e-mail da sua conta.',
+    wrong_password: 'Senha incorreta.',
+    token_invalid: 'Este link não é válido.',
+    token_expired: 'Este link expirou.',
+    resend_too_soon: 'Você poderá solicitar um novo e-mail em alguns instantes.',
+    email_unavailable: 'Não foi possível enviar e-mails agora. Tente de novo mais tarde.',
     server: 'O servidor não respondeu como esperado. Tente de novo.'
   };
   class BackendError extends Error {
@@ -107,10 +118,11 @@
   const LOCAL_ACCOUNT = Object.freeze({ tipoConta: 'FREE', origemPremium: 'NENHUMA', statusPremium: 'INATIVO', premium: { ativo: false, origem: 'NENHUMA' }, academia: { vinculada: false, id: null }, assinaturaIndividual: null, codigoPremium: null });
   const publicUser = (u) => ({ id: u.id, email: u.email, name: u.name, plan: u.plan || 'free', createdAt: u.createdAt, account: LOCAL_ACCOUNT });
 
-  function validate({ name, email, password }, { signup = false } = {}) {
+  function validate({ name, email, password, passwordConfirm }, { signup = false } = {}) {
     if (signup && !String(name || '').trim()) throw new BackendError('invalid_name');
     if (!validEmail(normEmail(email))) throw new BackendError('invalid_email');
     if (String(password || '').length < 6) throw new BackendError(signup ? 'weak_password' : 'invalid_login');
+    if (signup && passwordConfirm !== undefined && passwordConfirm !== password) throw new BackendError('password_mismatch');
   }
 
   /* ==========================================================================
@@ -121,8 +133,8 @@
     accounts: () => readJSON(ACCOUNTS_KEY, []),
     save(list) { if (!writeJSON(ACCOUNTS_KEY, list)) throw new BackendError('server', 'Não foi possível salvar neste aparelho.'); },
 
-    async register({ name, email, password }) {
-      validate({ name, email, password }, { signup: true });
+    async register({ name, email, password, passwordConfirm }) {
+      validate({ name, email, password, passwordConfirm }, { signup: true });
       const list = Local.accounts();
       email = normEmail(email);
       if (list.some((a) => a.email === email)) throw new BackendError('email_taken');
@@ -153,6 +165,13 @@
     async redeemPremiumCode() { throw new BackendError('server_only'); },
     async joinAcademy() { throw new BackendError('server_only'); },
     async leaveAcademy() { throw new BackendError('server_only'); },
+    // Confirmação de e-mail e recuperação de senha precisam do servidor (e-mail)
+    async verifyEmail() { throw new BackendError('server_only'); },
+    async resendVerification() { throw new BackendError('server_only'); },
+    async changeEmail() { throw new BackendError('server_only'); },
+    async requestPasswordReset() { throw new BackendError('server_only'); },
+    async checkPasswordReset() { throw new BackendError('server_only'); },
+    async confirmPasswordReset() { throw new BackendError('server_only'); },
 
     // Os dados já vivem no aparelho: não há o que baixar nem enviar
     async pull() { return null; },
@@ -184,7 +203,7 @@
 
   const Sheets = {
     name: 'sheets',
-    async register(d) { validate(d, { signup: true }); return call('register', { name: d.name, email: normEmail(d.email), password: d.password }); },
+    async register(d) { validate(d, { signup: true }); return call('register', { name: d.name, email: normEmail(d.email), password: d.password, passwordConfirm: d.passwordConfirm }); },
     async login(d) { validate(d); return call('login', { email: normEmail(d.email), password: d.password }); },
     async me(token) { return (await call('me', { token })).user; },
     async logout(token) { await call('logout', { token }); },
@@ -192,6 +211,13 @@
     async redeemPremiumCode(token, code) { return (await call('redeemPremiumCode', { token, code })).user; },
     async joinAcademy(token, code) { return (await call('joinAcademy', { token, code })).user; },
     async leaveAcademy(token) { return (await call('leaveAcademy', { token })).user; },
+    // O app só repassa o token do link (linkToken). Quem confere validade, uso e conta é o servidor.
+    async verifyEmail(linkToken) { return call('verifyEmail', { linkToken }); },
+    async resendVerification(token, linkToken) { return call('resendVerificationEmail', token ? { token } : { linkToken }); },
+    async changeEmail(token, email, password) { return call('changeEmail', { token, email: normEmail(email), password }); },
+    async requestPasswordReset(email) { return call('requestPasswordReset', { email: normEmail(email) }); },
+    async checkPasswordReset(linkToken) { return call('checkPasswordReset', { linkToken }); },
+    async confirmPasswordReset(linkToken, password, passwordConfirm) { return call('confirmPasswordReset', { linkToken, password, passwordConfirm }); },
     async pull(token, keys) { return (await call('pull', keys ? { token, keys } : { token })).data || {}; },
     // Devolve { workouts } quando o servidor preservou treinos do treinador
     async push(token, data) { return call('push', { token, data }); },
@@ -208,6 +234,7 @@
   function saveSession(tok, user) { writeJSON(SESSION_KEY, { token: tok, user, at: nowISO() }); return user; }
   function setSessionUser(user) { const s = session(); if (s) writeJSON(SESSION_KEY, Object.assign(s, { user })); return user; }
   function requireToken() { const t = token(); if (!t) throw new BackendError('invalid_session'); return t; }
+  function forgetSession() { try { localStorage.removeItem(SESSION_KEY); } catch (e) {} }
 
   const Backend = {
     mode: adapter.name,
@@ -216,24 +243,42 @@
     session,
     user: () => (session() || {}).user || null,
 
-    async register(data) { const r = await adapter.register(data); return saveSession(r.token, r.user); },
+    // Conta nova no servidor: user.emailVerified = false até tocar no link (emailSent diz se o e-mail saiu)
+    async register(data) {
+      const r = await adapter.register(data);
+      const user = saveSession(r.token, r.user);
+      return r.emailSent === false ? Object.assign({ emailSent: false }, user) : user;
+    },
     async login(data) { const r = await adapter.login(data); return saveSession(r.token, r.user); },
 
     async logout() {
       await Sync.flush().catch(() => {});
       try { await adapter.logout(token()); } catch (e) { /* sai mesmo sem servidor */ }
-      try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+      forgetSession();
     },
 
     // Atualiza nome e plano a partir do servidor (ex.: depois de um pagamento)
     async refresh() {
       const s = session();
       if (!s) return null;
-      try { return setSessionUser(await adapter.me(s.token, s.user.id)); } catch (e) {
-        if (e.code === 'invalid_session') { try { localStorage.removeItem(SESSION_KEY); } catch (_) {} throw e; }
+      try { return await Backend.fetchUser(); } catch (e) {
+        if (e.code === 'invalid_session') throw e;
         return s.user; // sem internet: continua com o que já sabe
       }
     },
+
+    // Igual ao refresh, mas sem internet dá erro (a tela "Confirme seu e-mail" precisa saber)
+    async fetchUser() {
+      const s = session();
+      if (!s) throw new BackendError('invalid_session');
+      try { return setSessionUser(await adapter.me(s.token, s.user.id)); } catch (e) {
+        if (e.code === 'invalid_session') forgetSession();
+        throw e;
+      }
+    },
+
+    // Esquece a sessão só neste aparelho (ex.: o servidor já encerrou todas depois da nova senha)
+    forgetSession,
 
     async setPlan(plan) {
       const s = session();
@@ -248,6 +293,21 @@
     async redeemPremiumCode(code) { return setSessionUser(await adapter.redeemPremiumCode(requireToken(), String(code || '').trim())); },
     async joinAcademy(code) { return setSessionUser(await adapter.joinAcademy(requireToken(), String(code || '').trim())); },
     async leaveAcademy() { return setSessionUser(await adapter.leaveAcademy(requireToken())); },
+
+    // Confirmação de e-mail (tela "Confirme seu e-mail" e link do e-mail)
+    verifyEmail: (linkToken) => adapter.verifyEmail(linkToken),
+    resendVerification: () => adapter.resendVerification(requireToken()),
+    resendVerificationByLink: (linkToken) => adapter.resendVerification(null, linkToken),
+    async changeEmail(email, password) {
+      const r = await adapter.changeEmail(requireToken(), email, password);
+      setSessionUser(r.user);
+      return r;
+    },
+
+    // Esqueci minha senha → link no e-mail → nova senha
+    requestPasswordReset: (email) => adapter.requestPasswordReset(email),
+    checkPasswordReset: (linkToken) => adapter.checkPasswordReset(linkToken),
+    confirmPasswordReset: (linkToken, password, passwordConfirm) => adapter.confirmPasswordReset(linkToken, password, passwordConfirm),
 
     pull: (keys) => adapter.pull(token(), keys),
     push: (data) => adapter.push(token(), data),
@@ -294,7 +354,7 @@
         .catch((e) => {
           keys.forEach((k) => pending.add(k));
           setState('offline');
-          if (e.code === 'invalid_session') return;
+          if (e.code === 'invalid_session' || e.code === 'email_not_verified') return;
           timer = setTimeout(flush, 30000);
         })
         .finally(() => { inFlight = null; });

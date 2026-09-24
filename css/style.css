@@ -758,6 +758,7 @@ button.row:active, a.row:active, .row.is-tappable:active { background: var(--sur
   gap: 8px;
 }
 .toast-host.is-raised { bottom: calc(var(--safe-bottom) + 20px); }
+.toast-host.is-top { top: calc(var(--safe-top) + 12px); bottom: auto; }
 .toast {
   pointer-events: auto;
   display: flex;
@@ -777,6 +778,7 @@ button.row:active, a.row:active, .row.is-tappable:active { background: var(--sur
   transition: opacity var(--dur-2) ease, transform var(--dur-3) var(--ease-out);
 }
 .toast.is-in { opacity: 1; transform: none; }
+.toast-host.is-top .toast:not(.is-in) { transform: translateY(-12px) scale(0.98); }
 .toast-icon { color: var(--accent); display: grid; }
 .toast-action { margin-left: auto; padding: 6px 12px; border-radius: 9999px; color: var(--accent); font-weight: 600; }
 
@@ -2432,6 +2434,58 @@ button.row[disabled] { opacity: 0.45; pointer-events: none; }
 .btn.is-loading { opacity: 0.7; }
 .auth-scroll { position: relative; height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .ob-frame.is-scroll { height: auto; min-height: 100%; padding-bottom: calc(var(--safe-bottom) + 40px); }
+
+/* Confirmar e-mail · links do e-mail · nova senha */
+.auth-status { flex: 1; display: flex; flex-direction: column; justify-content: center; padding-bottom: 24px; }
+.auth-badge {
+  width: 72px; height: 72px;
+  flex: none;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  margin-bottom: 28px;
+  animation: authPop 420ms var(--ease-out) both;
+}
+@keyframes authPop { from { opacity: 0; transform: scale(0.86); } to { opacity: 1; transform: none; } }
+.auth-badge.is-muted { background: var(--fill); color: var(--text-2); }
+.auth-spinner {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-top-color: var(--accent);
+  animation: authSpin 800ms linear infinite;
+}
+@keyframes authSpin { to { transform: rotate(360deg); } }
+.auth-email {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 9px 14px;
+  border-radius: 9999px;
+  background: var(--fill);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+.auth-email svg { flex: none; color: var(--text-2); }
+.auth-email span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auth-wait {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 6px 0 16px;
+  border-radius: var(--r-md);
+  background: var(--fill-2);
+  font-size: 15px;
+  color: var(--text-2);
+}
+.auth-wait .text-btn { font-size: 15px; font-weight: 600; }
+.auth-dot { --tint: var(--accent); width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--accent); animation: pulse 1.8s ease-in-out infinite; }
+.auth .field-error[data-warn] { min-height: 0; margin-top: 12px; }
+.auth .nowrap { white-space: nowrap; }
 
 /* ==========================================================================
    Planos

@@ -6,12 +6,15 @@
  *   2. Rode a função setup() uma vez (cria as abas e adiciona as colunas que faltarem).
  *   3. Implantar › Nova implantação › App da Web (executar como: você; acesso: qualquer pessoa).
  *   4. Cole a URL /exec em js/config.js (sheetsUrl) e mude backend para 'sheets'.
+ *   5. Propriedade do script APP_BASE_URL = endereço público do app (https://...): os links dos e-mails apontam para ela.
  *
  * Abas (as três primeiras já existiam; as colunas novas entram sempre no FIM, nada é apagado):
  *   usuarios:            id | email | nome | hash | salt | plano | criadoEm | planoAtualizadoEm
  *                        | tipoConta | origemPremium | statusPremium | premiumManual
  *                        | academiaId | academiaNome | statusVinculoAcademia | dataEntradaAcademia | dataSaidaAcademia
  *                        | dataNascimento | idade | pesoAtual | altura | ultimoAcesso | statusUsuario
+ *                        | emailVerificado | dataVerificacaoEmail | tokenVerificacaoEmailHash | tokenVerificacaoEmailExpira
+ *                        | tokenResetSenhaHash | tokenResetSenhaExpira
  *   sessoes:             token | userId | criadoEm | expiraEm | tipo (aluno · treinador)
  *   dados:               userId | chave | parte | json | atualizadoEm
  *                        (cada chave do app — treinos, sessões, peso... — é um JSON; textos grandes
@@ -35,17 +38,26 @@
  *   As colunas tipoConta, origemPremium, statusPremium e plano são um ESPELHO recalculado
  *   a cada acesso. Para mudar o Premium de alguém, mude a fonte, não o espelho.
  *
+ * E-MAIL CONFIRMADO E RECUPERAÇÃO DE SENHA (só contas de aluno; o FORJA Trainer não muda)
+ *   usuarios.emailVerificado: SIM (confirmou pelo link) · NAO (conta nova, ainda não confirmou)
+ *                             · LEGADO (conta criada antes da confirmação existir: continua entrando normalmente)
+ *   Os links levam um token aleatório de uso único; na planilha fica só o HMAC dele e a validade.
+ *   Conta NAO entra, mas só usa me / logout / resendVerificationEmail / changeEmail até confirmar.
+ *   Propriedade obrigatória para enviar e-mails: APP_BASE_URL (endereço público do app).
+ *
  * Todas as chamadas são POST com corpo JSON: { action, ...campos }.
  * Respostas: { ok: true, ... } ou { ok: false, error: 'codigo', message?: 'texto' }.
  */
 
-var SCHEMA_VERSION = '2';
+var SCHEMA_VERSION = '3';
 
 var SHEETS = {
   users: { name: 'usuarios', header: ['id', 'email', 'nome', 'hash', 'salt', 'plano', 'criadoEm', 'planoAtualizadoEm',
     'tipoConta', 'origemPremium', 'statusPremium', 'premiumManual',
     'academiaId', 'academiaNome', 'statusVinculoAcademia', 'dataEntradaAcademia', 'dataSaidaAcademia',
-    'dataNascimento', 'idade', 'pesoAtual', 'altura', 'ultimoAcesso', 'statusUsuario'], text: ['dataNascimento'] },
+    'dataNascimento', 'idade', 'pesoAtual', 'altura', 'ultimoAcesso', 'statusUsuario',
+    'emailVerificado', 'dataVerificacaoEmail', 'tokenVerificacaoEmailHash', 'tokenVerificacaoEmailExpira',
+    'tokenResetSenhaHash', 'tokenResetSenhaExpira'], text: ['dataNascimento'] },
   sessions: { name: 'sessoes', header: ['token', 'userId', 'criadoEm', 'expiraEm', 'tipo'] },
   data: { name: 'dados', header: ['userId', 'chave', 'parte', 'json', 'atualizadoEm'], text: ['json'] },
   academies: { name: 'academias', header: ['id', 'nome', 'codigo', 'status', 'plano', 'limiteAlunos', 'criadoEm', 'inicioContrato', 'fimContrato', 'statusContrato', 'atualizadoEm'], text: ['codigo', 'inicioContrato', 'fimContrato'] },
@@ -66,6 +78,11 @@ var CHUNK = 45000;
 var PW_ITERATIONS = 300;       // rodadas de HMAC-SHA256 no hash de senha (formato v1)
 var LOGIN_MAX_FAILS = 5;       // tentativas erradas antes do bloqueio temporário
 var LOGIN_LOCK_SECONDS = 900;
+var STUDENT_PASSWORD_MIN = 6;  // senha do aluno (a do treinador tem 8, em trainerChangePassword)
+var VERIFY_TOKEN_HOURS = 24;   // validade do link "Confirmar meu e-mail"
+var RESET_TOKEN_MINUTES = 30;  // validade do link de nova senha
+var MAIL_COOLDOWN_SECONDS = 60; // intervalo mínimo entre dois e-mails iguais para a mesma conta/endereço
+var MAIL_MAX_PER_HOUR = 5;     // e-mails de conta por conta/endereço por hora
 // Chaves que o app pode gravar (qualquer outra é recusada)
 var DATA_KEYS = ['meta', 'profile', 'settings', 'workouts', 'exercises', 'favorites', 'sessions', 'active', 'bodyweight', 'goals', 'program', 'reminders'];
 // Cores aceitas nos treinos (as mesmas de js/workouts.js)
@@ -79,6 +96,7 @@ var ROLE_PERMISSIONS = {
 };
 
 var REQ = {}; // cache de leitura das abas durante uma requisição
+var OUTBOX = []; // e-mails da requisição: saem depois que a trava é liberada (ver doPost)
 
 /* ---------- Entrada ---------- */
 function doGet() {
@@ -87,6 +105,8 @@ function doGet() {
 
 function doPost(e) {
   var lock = LockService.getScriptLock();
+  var out;
+  OUTBOX = [];
   try {
     // Uma requisição por vez: validações como o limite de alunos ficam atômicas
     lock.waitLock(20000);
@@ -94,35 +114,43 @@ function doPost(e) {
     ensureSchema_();
     var req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     var handler = ACTIONS[req.action];
-    if (!handler) return json_({ ok: false, error: 'unknown_action' });
-    return json_(handler(req));
+    out = handler ? handler(req) : { ok: false, error: 'unknown_action' };
   } catch (err) {
-    if (err && err.code) return json_({ ok: false, error: err.code, message: err.userMessage || undefined });
-    console.error(err);
-    return json_({ ok: false, error: 'server', message: String(err && err.message || err) });
+    OUTBOX = [];
+    if (err && err.code) out = { ok: false, error: err.code, message: err.userMessage || undefined };
+    else { console.error(err); out = { ok: false, error: 'server', message: String(err && err.message || err) }; }
   } finally {
     try { lock.releaseLock(); } catch (_) {}
   }
+  // O envio de e-mail leva ~1 s: fora da trava, ele não segura as requisições dos outros usuários
+  flushOutbox_(out);
+  return json_(out);
 }
 
 var ACTIONS = {
   /* ======================= App do aluno ======================= */
+  // A conta nasce com o e-mail NÃO confirmado: entra, mas só acessa os dados depois de tocar no link
   register: function (req) {
     var email = normEmail_(req.email);
     var name = str_(req.name, 30);
     var password = String(req.password || '');
     if (!name) fail_('invalid_name');
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) fail_('invalid_email');
-    if (password.length < 6) fail_('weak_password');
+    if (!validEmail_(email)) fail_('invalid_email');
+    if (password.length < STUDENT_PASSWORD_MIN) fail_('weak_password');
+    if (req.passwordConfirm !== undefined && String(req.passwordConfirm) !== password) fail_('password_mismatch');
     if (findUserBy_('email', email)) fail_('email_taken');
+    // Sem como enviar o link, a conta não é criada (ninguém fica preso numa conta que não consegue confirmar)
+    mailReady_();
     var salt = Utilities.getUuid();
     var id = 'u_' + Utilities.getUuid().replace(/-/g, '').slice(0, 16);
     var stamp = now_();
-    insert_('users', {
+    var user = createAccount_({
       id: id, email: email, nome: name, hash: pwHash_(salt, password), salt: salt, plano: 'free', criadoEm: stamp,
-      tipoConta: 'FREE', origemPremium: 'NENHUMA', statusPremium: 'INATIVO', ultimoAcesso: stamp, statusUsuario: 'ATIVO'
+      tipoConta: 'FREE', origemPremium: 'NENHUMA', statusPremium: 'INATIVO', ultimoAcesso: stamp, statusUsuario: 'ATIVO',
+      emailVerificado: 'NAO'
     });
-    var user = findUserBy_('id', id);
+    throttleMail_('verify:' + user.id);
+    sendAccountEmail_('verify', user, true);
     return { ok: true, token: newSession_(id, 'aluno'), user: publicUser_(user, syncAccount_(user)) };
   },
 
@@ -137,8 +165,9 @@ var ACTIONS = {
     return { ok: true, token: newSession_(row.id, 'aluno'), user: publicUser_(row, syncAccount_(row)) };
   },
 
+  // Também responde para conta com e-mail não confirmado (user.emailVerified = false): o app mostra "Confirme seu e-mail"
   me: function (req) {
-    var user = auth_(req.token);
+    var user = auth_(req.token, true);
     touch_(user);
     return { ok: true, user: publicUser_(user, syncAccount_(user)) };
   },
@@ -149,6 +178,91 @@ var ACTIONS = {
     for (var i = values.length - 1; i >= 1; i--) if (values[i][0] === req.token) sh.deleteRow(i + 1);
     delete REQ.sessions;
     return { ok: true };
+  },
+
+  /* ---------- Confirmação de e-mail e nova senha (só aluno) ----------
+     Os links do e-mail abrem o app em #/confirmar-email/<token> e #/redefinir-senha/<token>.
+     O app só repassa o token (linkToken); quem confere tudo é o servidor. */
+
+  // Abrir o link "Confirmar meu e-mail". Não exige sessão: o link pode ser aberto em outro aparelho.
+  verifyEmail: function (req) {
+    var u = userForLink_('verify', req.linkToken);
+    updateAccount_(u, verifiedChanges_());
+    return { ok: true, email: maskEmail_(u.email) };
+  },
+
+  // "Reenviar confirmação" (com a sessão) ou "Enviar novo link" (com o link vencido, sem sessão)
+  resendVerificationEmail: function (req) {
+    var u;
+    if (req.token) u = auth_(req.token, true);
+    else {
+      u = accountByLinkToken_('verify', req.linkToken);
+      if (!u) fail_('token_invalid');
+      if (up_(u.statusUsuario) === 'BLOQUEADO') fail_('account_blocked');
+    }
+    if (emailVerified_(u)) return { ok: true, alreadyVerified: true, email: maskEmail_(u.email) };
+    mailReady_();
+    throttleMail_('verify:' + u.id);
+    sendAccountEmail_('verify', u, true);
+    return { ok: true, email: maskEmail_(u.email), retryIn: MAIL_COOLDOWN_SECONDS };
+  },
+
+  // "Alterar e-mail" na tela de confirmação: corrige um e-mail digitado errado. Só para conta ainda não confirmada.
+  changeEmail: function (req) {
+    var u = auth_(req.token, true);
+    if (emailVerified_(u)) fail_('email_already_verified');
+    var email = normEmail_(req.email);
+    var current = normEmail_(u.email);
+    if (!validEmail_(email)) fail_('invalid_email');
+    if (email === current) fail_('email_same');
+    checkAttempts_('aluno', current);
+    if (!checkPassword_('users', u, String(req.password || ''))) { registerFail_('aluno', current); fail_('wrong_password'); }
+    clearFails_('aluno', current);
+    if (accountByEmail_(email)) fail_('email_taken');
+    mailReady_();
+    throttleMail_('verify:' + u.id, true); // endereço novo: sem espera, mas conta no limite por hora
+    // Links enviados para o endereço antigo deixam de valer
+    updateAccount_(u, { email: email, tokenResetSenhaHash: '', tokenResetSenhaExpira: '' });
+    sendAccountEmail_('verify', u, true);
+    return { ok: true, user: publicUser_(u), retryIn: MAIL_COOLDOWN_SECONDS };
+  },
+
+  // "Esqueci minha senha". A resposta é SEMPRE a mesma, exista ou não uma conta com este e-mail.
+  requestPasswordReset: function (req) {
+    var email = normEmail_(req.email);
+    if (!validEmail_(email)) fail_('invalid_email');
+    mailReady_();
+    // O limite vale para o endereço digitado, com ou sem conta: nem ele revela se a conta existe
+    throttleMail_('reset:' + email);
+    var u = accountByEmail_(email);
+    if (u && up_(u.statusUsuario) !== 'BLOQUEADO') sendAccountEmail_('reset', u, false);
+    else queueMail_(padTiming_, false);
+    return { ok: true };
+  },
+
+  // Tela "Nova senha": confere o link antes de mostrar o formulário (não gasta o link)
+  checkPasswordReset: function (req) {
+    var u = userForLink_('reset', req.linkToken);
+    return { ok: true, email: maskEmail_(u.email) };
+  },
+
+  // Grava a nova senha com o mesmo hash do cadastro, gasta o link e encerra as sessões da conta
+  confirmPasswordReset: function (req) {
+    var u = userForLink_('reset', req.linkToken);
+    var password = String(req.password || '');
+    if (password.length < STUDENT_PASSWORD_MIN) fail_('weak_password');
+    if (req.passwordConfirm !== undefined && String(req.passwordConfirm) !== password) fail_('password_mismatch');
+    var salt = Utilities.getUuid();
+    // Quem abriu o link provou que o e-mail é dele: se ainda não estava confirmado, fica confirmado
+    var changes = emailVerified_(u) ? {} : verifiedChanges_();
+    changes.hash = pwHash_(salt, password);
+    changes.salt = salt;
+    changes.tokenResetSenhaHash = '';
+    changes.tokenResetSenhaExpira = '';
+    updateAccount_(u, changes);
+    endStudentSessions_(u.id);
+    clearFails_('aluno', normEmail_(u.email));
+    return { ok: true, email: u.email };
   },
 
   // O pagamento ainda NÃO existe. O app não consegue mais virar Premium sozinho.
@@ -475,10 +589,14 @@ function setup() {
   props.deleteProperty('ALLOW_PLAN_CHANGE');
   REQ = {};
   migrateUsers_();
+  migrateEmailVerification_();
   backfillBody_();
   props.setProperty('SCHEMA_VERSION', SCHEMA_VERSION);
   var nomes = Object.keys(SHEETS).map(function (k) { return SHEETS[k].name; }).join(', ');
   Logger.log('FORJA: tudo pronto na planilha "' + ss.getName() + '". Abas: ' + nomes + '. Recarregue a planilha (F5) se elas ainda não aparecerem.');
+  if (!validBaseUrl_(mailConfig_().baseUrl)) {
+    Logger.log('FORJA: ATENÇÃO — defina a propriedade APP_BASE_URL (endereço público do app, https://...). Sem ela, novos cadastros e e-mails de senha ficam indisponíveis.');
+  }
   return 'Abas prontas em: ' + ss.getName();
 }
 
@@ -582,6 +700,9 @@ function onOpen() {
       .addSeparator()
       .addItem('Encerrar vínculo de aluno com academia', 'menuEncerrarVinculo')
       .addItem('Recalcular Premium de todos', 'menuRecalcular')
+      .addSeparator()
+      .addItem('Testar envio de e-mail', 'menuTestarEmail')
+      .addItem('Confirmar e-mail de aluno (suporte)', 'menuConfirmarEmailAluno')
       .addSeparator()
       .addItem('Atualizar estrutura (setup)', 'setup')
       .addToUi();
@@ -691,6 +812,22 @@ function menuRecalcular() {
     var n = 0;
     table_('users').rows.forEach(function (u) { syncAccount_(u); n++; });
     say_('FORJA', n + ' contas recalculadas.');
+  });
+}
+
+function menuTestarEmail() {
+  menu_(function () {
+    var email = ask_('Testar envio de e-mail', 'Enviar um e-mail de teste para:');
+    var r = adminTestarEmail(email);
+    say_('E-mail enviado', 'Confira a caixa de entrada de ' + r.email + ' (e o spam).\nO botão abre: ' + r.link + '\nE-mails que ainda podem ser enviados hoje: ' + r.restantes);
+  });
+}
+
+function menuConfirmarEmailAluno() {
+  menu_(function () {
+    var email = ask_('Confirmar e-mail', 'Use quando o aluno comprovou por outro canal que o e-mail é dele.\n\nE-mail do aluno:');
+    adminConfirmarEmailAluno(email);
+    say_('FORJA', 'E-mail confirmado: ' + normEmail_(email) + '\nO aluno já pode usar o app.');
   });
 }
 
@@ -807,6 +944,30 @@ function adminEncerrarVinculo(email, motivo) {
   if (up_(u.statusVinculoAcademia) !== 'ATIVO') fail_('invalid', 'Essa conta não está vinculada a nenhuma academia.');
   endLink_(u, motivo || 'ENCERRADO_ADMIN');
   return syncAccount_(u);
+}
+
+// Confere APP_BASE_URL, o provedor e a cota, e envia um e-mail com o mesmo visual dos e-mails da conta
+function adminTestarEmail(email) {
+  email = normEmail_(email);
+  if (!validEmail_(email)) fail_('invalid', 'E-mail inválido.');
+  var cfg = mailConfig_();
+  if (!validBaseUrl_(cfg.baseUrl)) fail_('invalid', 'Defina a propriedade APP_BASE_URL (Configurações do projeto › Propriedades do script) com o endereço público do app, começando com https://');
+  if (!MAIL_PROVIDERS[cfg.provider]) fail_('invalid', 'EMAIL_PROVIDER desconhecido: ' + cfg.provider);
+  deliverMail_(mailTemplate_({
+    to: email, subject: 'Teste de envio — FORJA', preheader: 'Os e-mails do FORJA estão configurados.',
+    title: 'Tudo certo por aqui', intro: 'Este é um e-mail de teste. Se ele chegou, a confirmação de e-mail e a recuperação de senha do FORJA vão chegar também.',
+    button: 'Abrir o FORJA', link: cfg.baseUrl, note: 'O botão abre o endereço configurado em APP_BASE_URL.',
+    footer: 'Enviado pelo menu FORJA Admin › Testar envio de e-mail.'
+  }));
+  return { email: email, link: cfg.baseUrl, restantes: MAIL_PROVIDERS[cfg.provider].remaining() };
+}
+
+// Suporte: confirma o e-mail de um aluno sem o link (ex.: o e-mail não chega e ele comprovou a identidade)
+function adminConfirmarEmailAluno(email) {
+  var u = accountByEmail_(email);
+  if (!u) fail_('invalid', 'Conta não encontrada: ' + email);
+  if (up_(u.emailVerificado) !== 'SIM') updateAccount_(u, verifiedChanges_());
+  return u.email;
 }
 
 // Apenas para testar o fluxo 4 do LEIA-ME: cria a "Academia Teste" (50 alunos, código FORJA-GYM-TESTE)
@@ -1424,7 +1585,7 @@ function findSession_(token) {
 /* ---------- Sessões e senhas ---------- */
 function publicUser_(u, state) {
   state = state || accountState_(u);
-  return { id: u.id, email: u.email, name: u.nome, plan: state.tipoConta === 'PREMIUM' ? 'premium' : 'free', createdAt: iso_(u.criadoEm), account: state };
+  return { id: u.id, email: u.email, name: u.nome, plan: state.tipoConta === 'PREMIUM' ? 'premium' : 'free', createdAt: iso_(u.criadoEm), emailVerified: emailVerified_(u), account: state };
 }
 
 function newSession_(userId, tipo) {
@@ -1434,14 +1595,22 @@ function newSession_(userId, tipo) {
   return token;
 }
 
-// Sessão de aluno (sessões antigas não têm tipo; token de treinador não serve aqui)
-function auth_(token) {
+// Sessão de aluno (sessões antigas não têm tipo; token de treinador não serve aqui).
+// Conta com e-mail ainda não confirmado só passa nas ações da tela "Confirme seu e-mail" (allowUnverified).
+function auth_(token, allowUnverified) {
   var s = findSession_(token);
   if (!s || s.tipo === 'treinador') fail_('invalid_session');
   var user = findUserBy_('id', s.userId);
   if (!user) fail_('invalid_session');
   if (up_(user.statusUsuario) === 'BLOQUEADO') fail_('account_blocked');
+  if (!allowUnverified && !emailVerified_(user)) fail_('email_not_verified');
   return user;
+}
+
+// Só NAO bloqueia. Vazio vale como LEGADO (linha anterior à atualização ou criada à mão na planilha).
+function emailVerified_(u) {
+  var v = up_(u.emailVerificado);
+  return v !== 'NAO' && v !== 'NÃO';
 }
 
 // Último acesso (grava no máximo uma vez por hora, para poupar a planilha)
@@ -1452,12 +1621,15 @@ function touch_(u, force) {
 
 // v1: HMAC-SHA256 iterado, com salt por conta e "pimenta" nas propriedades do script
 function pwHash_(salt, password) {
-  var pepper = PropertiesService.getScriptProperties().getProperty('PASSWORD_PEPPER');
-  if (!pepper) { setup(); pepper = PropertiesService.getScriptProperties().getProperty('PASSWORD_PEPPER'); }
-  var key = Utilities.newBlob(pepper).getBytes();
+  var key = Utilities.newBlob(pepper_()).getBytes();
   var h = Utilities.computeHmacSha256Signature(Utilities.newBlob(salt + ':' + password).getBytes(), key);
   for (var i = 1; i < PW_ITERATIONS; i++) h = Utilities.computeHmacSha256Signature(h, key);
   return 'v1$' + PW_ITERATIONS + '$' + hex_(h);
+}
+function pepper_() {
+  var pepper = PropertiesService.getScriptProperties().getProperty('PASSWORD_PEPPER');
+  if (!pepper) { setup(); pepper = PropertiesService.getScriptProperties().getProperty('PASSWORD_PEPPER'); }
+  return pepper;
 }
 // Hash antigo das contas (SHA-256 com salt), anterior ao formato v1
 function legacyHash_(salt, password) {
@@ -1484,6 +1656,237 @@ function registerFail_(kind, email) {
 }
 function clearFails_(kind, email) { CacheService.getScriptCache().remove('fail:' + kind + ':' + email); }
 
+/* ==========================================================================
+   Links do e-mail (confirmação e nova senha)
+   · Token: 2 UUID v4 (SecureRandom) = 64 caracteres hex, 244 bits aleatórios.
+   · Na planilha fica só HMAC-SHA256(PASSWORD_PEPPER, tipo:token) e a validade. Gerar um link
+     novo sobrescreve o anterior; usar o link apaga o hash. Cada link vale uma vez só.
+   ========================================================================== */
+var LINK_TOKENS = {
+  verify: { hash: 'tokenVerificacaoEmailHash', expira: 'tokenVerificacaoEmailExpira', ms: VERIFY_TOKEN_HOURS * 3600000, route: 'confirmar-email' },
+  reset: { hash: 'tokenResetSenhaHash', expira: 'tokenResetSenhaExpira', ms: RESET_TOKEN_MINUTES * 60000, route: 'redefinir-senha' }
+};
+
+// Grava o hash de um token novo e devolve o link completo (só ele carrega o token puro)
+function issueLinkToken_(u, kind) {
+  var def = LINK_TOKENS[kind];
+  var token = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '').toLowerCase();
+  var changes = {};
+  changes[def.hash] = linkTokenHash_(kind, token);
+  changes[def.expira] = new Date(Date.now() + def.ms).toISOString();
+  updateAccount_(u, changes);
+  return mailConfig_().baseUrl + '#/' + def.route + '/' + token;
+}
+
+function linkTokenHash_(kind, token) {
+  var h = Utilities.computeHmacSha256Signature(Utilities.newBlob(kind + ':' + token).getBytes(), Utilities.newBlob(pepper_()).getBytes());
+  return 'v1$' + hex_(h);
+}
+
+// Confere o link: existe e confere com o hash · não venceu · a conta existe e não está bloqueada
+function userForLink_(kind, linkToken) {
+  var u = accountByLinkToken_(kind, linkToken);
+  if (!u) fail_('token_invalid');
+  var until = toDate_(u[LINK_TOKENS[kind].expira]);
+  if (!until || until.getTime() <= Date.now()) fail_('token_expired');
+  if (up_(u.statusUsuario) === 'BLOQUEADO') fail_('account_blocked');
+  return u;
+}
+
+function verifiedChanges_() {
+  return { emailVerificado: 'SIM', dataVerificacaoEmail: now_(), tokenVerificacaoEmailHash: '', tokenVerificacaoEmailExpira: '' };
+}
+
+// Gera o link (o anterior deixa de valer) e agenda o e-mail. report: a resposta leva emailSent.
+function sendAccountEmail_(kind, u, report) {
+  var link = issueLinkToken_(u, kind);
+  var to = u.email;
+  queueMail_(function () {
+    if (kind === 'verify') sendVerificationEmail_(to, link);
+    else sendPasswordResetEmail_(to, link);
+  }, report);
+}
+
+// No máximo 1 e-mail a cada MAIL_COOLDOWN_SECONDS e MAIL_MAX_PER_HOUR por hora, por chave (conta ou endereço)
+function throttleMail_(key, skipCooldown) {
+  var cache = CacheService.getScriptCache();
+  var k = 'mail:' + key;
+  var st = {};
+  try { st = JSON.parse(cache.get(k) || '{}'); } catch (e) { st = {}; }
+  var nowMs = Date.now();
+  var count = Number(st.count) || 0;
+  if ((!skipCooldown && st.last && nowMs - st.last < MAIL_COOLDOWN_SECONDS * 1000) || count >= MAIL_MAX_PER_HOUR) fail_('resend_too_soon');
+  cache.put(k, JSON.stringify({ last: nowMs, count: count + 1 }), 3600);
+}
+
+/* ==========================================================================
+   E-mails da conta
+   O resto do sistema só chama sendVerificationEmail_() e sendPasswordResetEmail_().
+   Quem entrega é o provedor da propriedade EMAIL_PROVIDER (padrão: MAILAPP, a cota do próprio Google).
+   Para usar Resend, SendGrid, Amazon SES...: acrescente um adaptador em MAIL_PROVIDERS com
+   remaining() e send(mensagem, config) — veja backend/LEIA-ME.md — e mude EMAIL_PROVIDER.
+   ========================================================================== */
+var MAIL_PROVIDERS = {
+  MAILAPP: {
+    remaining: function () { return MailApp.getRemainingDailyQuota(); },
+    send: function (m, cfg) {
+      var opts = { to: m.to, subject: m.subject, htmlBody: m.html, body: m.text, name: 'FORJA' };
+      if (cfg.replyTo) opts.replyTo = cfg.replyTo;
+      MailApp.sendEmail(opts);
+    }
+  }
+};
+
+function mailConfig_() {
+  var p = PropertiesService.getScriptProperties();
+  return {
+    provider: up_(p.getProperty('EMAIL_PROVIDER')) || 'MAILAPP',
+    baseUrl: String(p.getProperty('APP_BASE_URL') || '').trim().replace(/#.*$/, ''),
+    replyTo: normEmail_(p.getProperty('EMAIL_REPLY_TO'))
+  };
+}
+
+// Os links nunca usam um endereço mandado pelo app: um link forjado levaria o token para outro site
+function validBaseUrl_(url) {
+  return /^https:\/\/[^\s#]+$/i.test(url) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/[^\s#]*)?$/i.test(url);
+}
+
+// Antes de gerar qualquer link: endereço do app configurado, provedor conhecido e cota do dia
+function mailReady_() {
+  var cfg = mailConfig_();
+  var provider = MAIL_PROVIDERS[cfg.provider];
+  var problem = !validBaseUrl_(cfg.baseUrl) ? 'APP_BASE_URL ausente ou inválida'
+    : !provider ? 'EMAIL_PROVIDER desconhecido: ' + cfg.provider
+    : provider.remaining() < 1 ? 'cota diária de e-mails esgotada' : '';
+  if (problem) { console.error('FORJA e-mail: ' + problem); fail_('email_unavailable'); }
+}
+
+function deliverMail_(m) {
+  var cfg = mailConfig_();
+  var provider = MAIL_PROVIDERS[cfg.provider];
+  if (!provider) throw new Error('EMAIL_PROVIDER desconhecido: ' + cfg.provider);
+  provider.send(m, cfg);
+}
+
+function sendVerificationEmail_(to, link) {
+  deliverMail_(mailTemplate_({
+    to: to, subject: 'Confirme seu e-mail — FORJA',
+    preheader: 'Confirme seu endereço de e-mail para ativar sua conta no FORJA.',
+    title: 'Confirme seu e-mail',
+    intro: 'Falta só um passo para ativar sua conta no FORJA. Toque no botão abaixo para confirmar que este endereço é seu.',
+    button: 'Confirmar meu e-mail', link: link,
+    note: 'O link vale por ' + VERIFY_TOKEN_HOURS + ' horas e só pode ser usado uma vez.',
+    footer: 'Se você não criou uma conta no FORJA, pode ignorar este e-mail com segurança.'
+  }));
+}
+
+function sendPasswordResetEmail_(to, link) {
+  deliverMail_(mailTemplate_({
+    to: to, subject: 'Redefina sua senha — FORJA',
+    preheader: 'Recebemos um pedido para redefinir a senha da sua conta.',
+    title: 'Redefina sua senha',
+    intro: 'Recebemos um pedido para redefinir a senha da sua conta no FORJA. Toque no botão abaixo para criar uma nova senha.',
+    button: 'Criar nova senha', link: link,
+    note: 'O link vale por ' + RESET_TOKEN_MINUTES + ' minutos e só pode ser usado uma vez. Ao trocar a senha, você sai da conta em todos os aparelhos.',
+    footer: 'Se você não pediu para redefinir a senha, ignore este e-mail. Sua senha atual continua valendo.'
+  }));
+}
+
+// Mesmo visual do app: fundo agrupado do iOS, cartão branco, botão em cápsula laranja com texto preto.
+// Sem nome do usuário: quem cadastra pode digitar o e-mail de outra pessoa.
+function mailTemplate_(o) {
+  var font = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+  var url = html_(o.link);
+  var html =
+    '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only">' +
+    '<title>' + html_(o.subject) + '</title></head>' +
+    '<body style="margin:0;padding:0;background:#F2F2F7;-webkit-text-size-adjust:100%;">' +
+    '<div style="display:none;max-height:0;overflow:hidden;opacity:0;">' + html_(o.preheader) + '</div>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F2F2F7;">' +
+    '<tr><td align="center" style="padding:40px 16px;">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;">' +
+    '<tr><td style="padding:0 4px 18px;font-family:' + font + ';font-size:13px;font-weight:800;letter-spacing:0.22em;color:#BF5A00;">FORJA</td></tr>' +
+    '<tr><td style="background:#FFFFFF;border-radius:22px;padding:36px 28px 32px;">' +
+    '<h1 style="margin:0 0 12px;font-family:' + font + ';font-size:26px;line-height:1.2;font-weight:700;color:#000000;">' + html_(o.title) + '</h1>' +
+    '<p style="margin:0 0 28px;font-family:' + font + ';font-size:16px;line-height:1.5;color:#3C3C43;">' + html_(o.intro) + '</p>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+    '<td align="center" bgcolor="#FF9F0A" style="border-radius:9999px;">' +
+    '<a href="' + url + '" target="_blank" style="display:block;padding:16px 24px;font-family:' + font + ';font-size:17px;font-weight:600;color:#000000;text-decoration:none;border-radius:9999px;">' + html_(o.button) + '</a>' +
+    '</td></tr></table>' +
+    '<p style="margin:24px 0 0;font-family:' + font + ';font-size:14px;line-height:1.5;color:#6D6D72;">' + html_(o.note) + '</p>' +
+    '</td></tr>' +
+    '<tr><td style="padding:24px 4px 0;font-family:' + font + ';font-size:12px;line-height:1.6;color:#8E8E93;">' +
+    'Se o botão não funcionar, copie este endereço e cole no navegador:<br>' +
+    '<a href="' + url + '" target="_blank" style="color:#BF5A00;word-break:break-all;">' + url + '</a>' +
+    '<br><br>' + html_(o.footer) +
+    '</td></tr></table></td></tr></table></body></html>';
+  var text = [o.title, '', o.intro, '', o.button + ': ' + o.link, '', o.note, '', o.footer, '', '— FORJA'].join('\n');
+  return { to: o.to, subject: o.subject, html: html, text: text };
+}
+
+// Os e-mails da requisição saem em doPost, depois que a trava é liberada
+function queueMail_(fn, report) { OUTBOX.push({ fn: fn, report: !!report }); }
+function flushOutbox_(out) {
+  var jobs = OUTBOX;
+  OUTBOX = [];
+  jobs.forEach(function (job) {
+    var ok = true;
+    try { job.fn(); } catch (e) { ok = false; console.error('FORJA e-mail não enviado: ' + (e && e.message || e)); }
+    if (job.report && out && out.ok) out.emailSent = ok;
+  });
+}
+// "Esqueci minha senha" sem conta: espera o tempo de um envio, para a demora não denunciar se a conta existe
+function padTiming_() { Utilities.sleep(400 + Math.floor(Math.random() * 500)); }
+
+/* ==========================================================================
+   Contas de aluno — camada de dados da confirmação de e-mail e da nova senha
+   Essas regras só leem e gravam contas e sessões por aqui. Numa migração para
+   outro banco (PostgreSQL, Supabase...), é esta seção que muda; as ações não.
+   ========================================================================== */
+function accountByEmail_(email) { return findUserBy_('email', normEmail_(email)); }
+
+function accountByLinkToken_(kind, linkToken) {
+  var token = String(linkToken || '').toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(token)) return null;
+  var field = LINK_TOKENS[kind].hash;
+  var hash = linkTokenHash_(kind, token);
+  var rows = table_('users').rows;
+  for (var i = 0; i < rows.length; i++) if (rows[i][field] && safeEqual_(String(rows[i][field]), hash)) return userObj_(rows[i]);
+  return null;
+}
+
+function createAccount_(row) {
+  insert_('users', row);
+  return findUserBy_('id', row.id);
+}
+
+function updateAccount_(u, changes) { patch_('users', u, changes); }
+
+// Sai de todos os aparelhos (depois da nova senha). Só sessões de aluno: as de treinador não mudam.
+function endStudentSessions_(userId) {
+  var t = table_('sessions');
+  var mine = t.rows.filter(function (s) { return s.userId === userId && s.tipo !== 'treinador'; });
+  mine.sort(function (a, b) { return b._row - a._row; }).forEach(function (s) { t.sh.deleteRow(s._row); });
+  delete REQ.sessions;
+  return mine.length;
+}
+
+// Contas criadas antes da confirmação de e-mail continuam entrando normalmente: LEGADO.
+// Uma gravação só, na coluna inteira; linhas vazias da planilha não são tocadas.
+function migrateEmailVerification_() {
+  var t = table_('users');
+  var col = t.header.indexOf('emailVerificado');
+  var todo = t.rows.filter(function (u) { return (u.id || u.email) && blank_(u.emailVerificado); });
+  if (col < 0 || !todo.length) return 0;
+  var range = t.sh.getRange(2, col + 1, t.sh.getLastRow() - 1, 1);
+  var values = range.getValues();
+  todo.forEach(function (u) { values[u._row - 2][0] = 'LEGADO'; u.emailVerificado = 'LEGADO'; });
+  range.setValues(values);
+  delete REQ.users;
+  return todo.length;
+}
+
 /* ---------- Auxiliares ---------- */
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
@@ -1491,6 +1894,17 @@ function json_(obj) {
 function fail_(code, message) { var e = new Error(message || code); e.code = code; e.userMessage = message; throw e; }
 function now_() { return new Date().toISOString(); }
 function normEmail_(e) { return String(e || '').trim().toLowerCase(); }
+function validEmail_(e) { return e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e); }
+// g•••r@gmail.com: o suficiente para a pessoa reconhecer o próprio e-mail
+function maskEmail_(e) {
+  var parts = String(e || '').split('@');
+  var local = parts[0] || '';
+  var shown = local.length <= 2 ? local.charAt(0) + '•' : local.charAt(0) + '•••' + local.charAt(local.length - 1);
+  return parts.length > 1 ? shown + '@' + parts.slice(1).join('@') : shown;
+}
+function html_(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 function normCode_(c) { return String(c || '').trim().toUpperCase().replace(/\s+/g, ''); }
 function up_(v) { return String(v == null ? '' : v).trim().toUpperCase(); }
 function str_(v, max) { return String(v == null ? '' : v).trim().replace(/\s+/g, ' ').slice(0, max); }

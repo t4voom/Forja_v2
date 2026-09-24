@@ -1039,6 +1039,8 @@
         if (data && Array.isArray(data.workouts) && global.Workouts.applyRemote(data.workouts) && started) Router.refresh();
       } catch (e) {
         if (e.code === 'invalid_session') location.reload();
+        // O servidor passou a exigir a confirmação do e-mail: guarda o que ele disse e reabre na tela de confirmação
+        else if (e.code === 'email_not_verified') global.Backend.refresh().finally(() => location.reload());
       } finally {
         busy = false;
       }
