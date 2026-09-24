@@ -89,6 +89,8 @@ var MAIL_COOLDOWN_SECONDS = 60; // intervalo mínimo entre dois e-mails iguais p
 var MAIL_MAX_PER_HOUR = 5;     // e-mails de conta por conta/endereço por hora
 // Versão dos Termos de Uso e da Política de Privacidade aceitos no cadastro (a data da versão publicada).
 // Ao mudar os textos de termos.html / privacidade.html, atualize aqui.
+// ⚠️ PENDENTE: as páginas estão com o responsável e o e-mail PROVISÓRIOS ("Equipe FORJA",
+// privacidade@forja.example). Troque pelos reais antes de divulgar e atualize esta data.
 var TERMS_VERSION = '2026-09-24';
 // Chaves que o app pode gravar (qualquer outra é recusada)
 var DATA_KEYS = ['meta', 'profile', 'settings', 'workouts', 'exercises', 'favorites', 'sessions', 'active', 'bodyweight', 'goals', 'program', 'reminders'];

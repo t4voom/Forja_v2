@@ -1,5 +1,7 @@
 # FORJA com Google Planilhas
 
+> **⚠️ PENDENTE antes de divulgar o app (LGPD):** `termos.html` e `privacidade.html` estão com o responsável **"Equipe FORJA"** e o e-mail **privacidade@forja.example**, que são **provisórios**. Troque pelo nome do responsável (pessoa, ou razão social + CNPJ) e por um e-mail de contato real — procure por `PENDENTE` nos dois arquivos. Depois, atualize "Última atualização" nas páginas e `TERMS_VERSION` no `Code.gs`. Vale também a revisão de um advogado.
+
 O Google Planilhas é o banco de dados do FORJA. O app (celular) e o **FORJA Trainer** (Dashboard web das academias) falam com o mesmo Apps Script, que valida tudo antes de gravar.
 
 ```
@@ -82,7 +84,7 @@ Arquivos: `manifest.webmanifest`, `sw.js`, `js/pwa.js` e os ícones em `assets/i
 
 ## LGPD: termos, privacidade e exclusão de conta
 
-**Textos:** `termos.html` e `privacidade.html`, na raiz do app (ex.: `https://…/Forja_v2/termos.html`). São um **rascunho** feito a partir do que o sistema realmente faz — vale a revisão de um advogado. Os trechos marcados como **[NOME DO RESPONSÁVEL]** e **[E-MAIL DE CONTATO]** precisam ser preenchidos antes de publicar.
+**Textos:** `termos.html` e `privacidade.html`, na raiz do app (ex.: `https://…/Forja_v2/termos.html`). São um **rascunho** feito a partir do que o sistema realmente faz — vale a revisão de um advogado. **PENDENTE:** o responsável ("Equipe FORJA") e o e-mail (privacidade@forja.example) são provisórios; troque pelos reais (procure por `PENDENTE` nas duas páginas).
 
 **Aceite:** o cadastro só continua com a caixa *"Li e aceito os Termos de Uso e a Política de Privacidade"* marcada (o servidor também confere). Ficam gravados em `usuarios.termosAceitosEm` (data) e `usuarios.termosVersao` (versão). Ao mudar os textos, troque a data em "Última atualização" das duas páginas **e** a constante `TERMS_VERSION` no `Code.gs`. Contas criadas antes desta versão ficam com essas colunas vazias.
 

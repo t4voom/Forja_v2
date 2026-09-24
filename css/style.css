@@ -2534,7 +2534,6 @@ button.row[disabled] { opacity: 0.45; pointer-events: none; }
 .legal-back { display: inline-flex; align-items: center; min-height: 44px; font-size: 17px; font-weight: 500; }
 .legal-date { margin-top: 8px !important; font-size: 13px; color: var(--text-2); }
 .legal-foot { margin-top: 48px !important; padding-top: 20px; border-top: 0.5px solid var(--sep); font-size: 14px; }
-.legal-todo { background: var(--accent-soft); color: var(--accent); padding: 0 4px; border-radius: 4px; }
 
 /* Instalar o FORJA (passo a passo) */
 .install-steps { display: grid; gap: 18px; padding: 4px 0 8px; }
