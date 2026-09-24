@@ -53,6 +53,10 @@
     }
     show();
     render('welcome', 'fade');
+    // Aviso deixado antes de recarregar (ex.: conta excluída)
+    let notice = null;
+    try { notice = sessionStorage.getItem('forja.notice'); sessionStorage.removeItem('forja.notice'); } catch (e) { /* aba privada */ }
+    if (notice) setTimeout(() => UI.toast(notice, { iconName: 'check', duration: 4500 }), 500);
   }
 
   function show() {
@@ -131,6 +135,10 @@
             </div>
             <label class="form-label mt-5" for="a-pass2">Confirmar senha</label>
             <input class="field auth-pass" id="a-pass2" name="passwordConfirm" type="password" autocomplete="new-password" enterkeyhint="go" placeholder="Digite a senha de novo">
+            <label class="auth-terms mt-5">
+              <input type="checkbox" name="acceptTerms">
+              <span>Li e aceito os <a href="termos.html" target="_blank" rel="noopener">Termos de Uso</a> e a <a href="privacidade.html" target="_blank" rel="noopener">Política de Privacidade</a>.</span>
+            </label>
             <p class="field-error" aria-live="polite"></p>
           </div>
         </div>
@@ -377,14 +385,17 @@
   // Erro do servidor → campo que fica vermelho
   const FIELD_OF = {
     invalid_email: 'email', email_taken: 'email', email_same: 'email', invalid_name: 'name',
-    weak_password: 'password', invalid_login: 'password', wrong_password: 'password', password_mismatch: 'passwordConfirm'
+    weak_password: 'password', invalid_login: 'password', wrong_password: 'password', password_mismatch: 'passwordConfirm',
+    terms_required: 'acceptTerms'
   };
 
   function bindForm(view, form) {
     const error = form.querySelector('.field-error');
-    const inputs = [...form.querySelectorAll('input')];
+    const inputs = [...form.querySelectorAll('input:not([type="checkbox"])')];
+    const clear = () => { error.textContent = ''; form.querySelectorAll('.is-invalid').forEach((x) => x.classList.remove('is-invalid')); };
+    form.querySelectorAll('input[type="checkbox"]').forEach((c) => c.addEventListener('change', clear));
     inputs.forEach((input, i) => {
-      input.addEventListener('input', () => { error.textContent = ''; inputs.forEach((x) => x.classList.remove('is-invalid')); });
+      input.addEventListener('input', clear);
       // "Próximo" do teclado pula para o campo seguinte; no último, envia
       input.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' || e.isComposing) return;
@@ -416,6 +427,7 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const data = Object.fromEntries(new FormData(form).entries());
+      form.querySelectorAll('input[type="checkbox"]').forEach((c) => { data[c.name] = c.checked; });
       const submit = form.querySelector('[type="submit"]');
       const label = submit.textContent;
       submit.disabled = true;
@@ -429,7 +441,7 @@
         submit.textContent = label;
         error.textContent = err.message || 'Algo deu errado. Tente de novo.';
         const input = FIELD_OF[err.code] && form.querySelector(`[name="${FIELD_OF[err.code]}"]`);
-        if (input) { input.classList.add('is-invalid'); input.focus({ preventScroll: true }); }
+        if (input) { (input.closest('.auth-terms') || input).classList.add('is-invalid'); input.focus({ preventScroll: true }); }
         form.classList.remove('shake'); void form.offsetWidth; form.classList.add('shake');
       }
     });

@@ -15,7 +15,7 @@
  *                        | academiaId | academiaNome | statusVinculoAcademia | dataEntradaAcademia | dataSaidaAcademia
  *                        | dataNascimento | idade | pesoAtual | altura | ultimoAcesso | statusUsuario
  *                        | emailVerificado | dataVerificacaoEmail | tokenVerificacaoEmailHash | tokenVerificacaoEmailExpira
- *                        | tokenResetSenhaHash | tokenResetSenhaExpira
+ *                        | tokenResetSenhaHash | tokenResetSenhaExpira | termosAceitosEm | termosVersao
  *   sessoes:             token | userId | criadoEm | expiraEm | tipo (aluno · treinador)
  *   dados:               userId | chave | parte | json | atualizadoEm
  *                        (cada chave do app — treinos, sessões, peso... — é um JSON; textos grandes
@@ -43,14 +43,17 @@
  *   usuarios.emailVerificado: SIM (confirmou pelo link) · NAO (conta nova, ainda não confirmou)
  *                             · LEGADO (conta criada antes da confirmação existir: continua entrando normalmente)
  *   Os links levam um token aleatório de uso único; na planilha fica só o HMAC dele e a validade.
- *   Conta NAO entra, mas só usa me / logout / resendVerificationEmail / changeEmail até confirmar.
+ *   Conta NAO entra, mas só usa me / logout / resendVerificationEmail / changeEmail / deleteAccount até confirmar.
  *   Propriedade obrigatória para enviar e-mails: APP_BASE_URL (endereço público do app).
+ *
+ * LGPD: o cadastro registra o aceite dos Termos e da Política (termosAceitosEm, termosVersao = TERMS_VERSION).
+ *   "Excluir minha conta" (deleteAccount) apaga a conta e os dados; "Apagar todos os dados" (clear) mantém a conta.
  *
  * Todas as chamadas são POST com corpo JSON: { action, ...campos }.
  * Respostas: { ok: true, ... } ou { ok: false, error: 'codigo', message?: 'texto' }.
  */
 
-var SCHEMA_VERSION = '3';
+var SCHEMA_VERSION = '4';
 
 var SHEETS = {
   users: { name: 'usuarios', header: ['id', 'email', 'nome', 'hash', 'salt', 'plano', 'criadoEm', 'planoAtualizadoEm',
@@ -58,7 +61,7 @@ var SHEETS = {
     'academiaId', 'academiaNome', 'statusVinculoAcademia', 'dataEntradaAcademia', 'dataSaidaAcademia',
     'dataNascimento', 'idade', 'pesoAtual', 'altura', 'ultimoAcesso', 'statusUsuario',
     'emailVerificado', 'dataVerificacaoEmail', 'tokenVerificacaoEmailHash', 'tokenVerificacaoEmailExpira',
-    'tokenResetSenhaHash', 'tokenResetSenhaExpira'], text: ['dataNascimento'] },
+    'tokenResetSenhaHash', 'tokenResetSenhaExpira', 'termosAceitosEm', 'termosVersao'], text: ['dataNascimento', 'termosVersao'] },
   sessions: { name: 'sessoes', header: ['token', 'userId', 'criadoEm', 'expiraEm', 'tipo'] },
   data: { name: 'dados', header: ['userId', 'chave', 'parte', 'json', 'atualizadoEm'], text: ['json'] },
   academies: { name: 'academias', header: ['id', 'nome', 'codigo', 'status', 'plano', 'limiteAlunos', 'criadoEm', 'inicioContrato', 'fimContrato', 'statusContrato', 'atualizadoEm'], text: ['codigo', 'inicioContrato', 'fimContrato'] },
@@ -84,6 +87,9 @@ var VERIFY_TOKEN_HOURS = 24;   // validade do link "Confirmar meu e-mail"
 var RESET_TOKEN_MINUTES = 30;  // validade do link de nova senha
 var MAIL_COOLDOWN_SECONDS = 60; // intervalo mínimo entre dois e-mails iguais para a mesma conta/endereço
 var MAIL_MAX_PER_HOUR = 5;     // e-mails de conta por conta/endereço por hora
+// Versão dos Termos de Uso e da Política de Privacidade aceitos no cadastro (a data da versão publicada).
+// Ao mudar os textos de termos.html / privacidade.html, atualize aqui.
+var TERMS_VERSION = '2026-09-24';
 // Chaves que o app pode gravar (qualquer outra é recusada)
 var DATA_KEYS = ['meta', 'profile', 'settings', 'workouts', 'exercises', 'favorites', 'sessions', 'active', 'bodyweight', 'goals', 'program', 'reminders'];
 // Cores aceitas nos treinos (as mesmas de js/workouts.js)
@@ -139,6 +145,8 @@ var ACTIONS = {
     if (!validEmail_(email)) fail_('invalid_email');
     if (password.length < STUDENT_PASSWORD_MIN) fail_('weak_password');
     if (req.passwordConfirm !== undefined && String(req.passwordConfirm) !== password) fail_('password_mismatch');
+    // LGPD: o aceite fica registrado (data e versão dos textos)
+    if (req.acceptTerms !== true) fail_('terms_required');
     if (findUserBy_('email', email)) fail_('email_taken');
     // Sem como enviar o link, a conta não é criada (ninguém fica preso numa conta que não consegue confirmar)
     mailReady_();
@@ -148,7 +156,7 @@ var ACTIONS = {
     var user = createAccount_({
       id: id, email: email, nome: name, hash: pwHash_(salt, password), salt: salt, plano: 'free', criadoEm: stamp,
       tipoConta: 'FREE', origemPremium: 'NENHUMA', statusPremium: 'INATIVO', ultimoAcesso: stamp, statusUsuario: 'ATIVO',
-      emailVerificado: 'NAO'
+      emailVerificado: 'NAO', termosAceitosEm: stamp, termosVersao: TERMS_VERSION
     });
     throttleMail_('verify:' + user.id);
     sendAccountEmail_('verify', user, true);
@@ -360,10 +368,39 @@ var ACTIONS = {
     return res;
   },
 
-  // "Apagar todos os dados" no app
+  // "Apagar todos os dados" no app: treinos, histórico, pesos e dados do corpo. A conta continua.
   clear: function (req) {
     var user = auth_(req.token);
-    removeRows_(user.id, null);
+    eraseTrainingData_(user);
+    return { ok: true };
+  },
+
+  // Perfil › Trocar senha. Esta sessão continua; as dos outros aparelhos são encerradas.
+  changePassword: function (req) {
+    var u = auth_(req.token);
+    var email = normEmail_(u.email);
+    var current = String(req.current || '');
+    var next = String(req.next || '');
+    checkAttempts_('aluno', email);
+    if (!checkPassword_('users', u, current)) { registerFail_('aluno', email); fail_('wrong_password'); }
+    clearFails_('aluno', email);
+    if (next.length < STUDENT_PASSWORD_MIN) fail_('weak_password');
+    if (req.nextConfirm !== undefined && String(req.nextConfirm) !== next) fail_('password_mismatch');
+    if (next === current) fail_('password_same');
+    var salt = Utilities.getUuid();
+    // Um link de "Esqueci minha senha" ainda aberto deixa de valer
+    updateAccount_(u, { hash: pwHash_(salt, next), salt: salt, tokenResetSenhaHash: '', tokenResetSenhaExpira: '' });
+    return { ok: true, otherSessionsEnded: endStudentSessions_(u.id, req.token) };
+  },
+
+  // Perfil › Excluir minha conta (LGPD, direito de eliminação). Pede a senha de novo.
+  deleteAccount: function (req) {
+    var u = auth_(req.token, true);
+    var email = normEmail_(u.email);
+    checkAttempts_('aluno', email);
+    if (!checkPassword_('users', u, String(req.password || ''))) { registerFail_('aluno', email); fail_('wrong_password'); }
+    clearFails_('aluno', email);
+    deleteAccount_(u);
     return { ok: true };
   },
 
@@ -1637,7 +1674,9 @@ function patch_(which, rowObj, changes) {
     if (String(values[j]) !== String(v)) { values[j] = cell_(v); changed = true; }
     rowObj[k] = v;
   });
-  if (changed) range.setValues([values]);
+  // A linha inteira é regravada: os textos que já estavam lá também precisam do apóstrofo (senão, um nome
+  // como "=Ana" ou "+Forte" vira fórmula na próxima gravação)
+  if (changed) range.setValues([values.map(cell_)]);
 }
 
 function userObj_(r) { r.name = r.nome; r.plan = String(r.plano || 'free').toLowerCase(); r.createdAt = r.criadoEm; return r; }
@@ -1961,13 +2000,54 @@ function createAccount_(row) {
 
 function updateAccount_(u, changes) { patch_('users', u, changes); }
 
-// Sai de todos os aparelhos (depois da nova senha). Só sessões de aluno: as de treinador não mudam.
-function endStudentSessions_(userId) {
+// Sai de todos os aparelhos (depois da nova senha), menos a sessão keepToken se vier.
+// Só sessões de aluno: as de treinador não mudam.
+function endStudentSessions_(userId, keepToken) {
   var t = table_('sessions');
-  var mine = t.rows.filter(function (s) { return s.userId === userId && s.tipo !== 'treinador'; });
+  var mine = t.rows.filter(function (s) { return s.userId === userId && s.tipo !== 'treinador' && (!keepToken || s.token !== keepToken); });
   mine.sort(function (a, b) { return b._row - a._row; }).forEach(function (s) { t.sh.deleteRow(s._row); });
   delete REQ.sessions;
   return mine.length;
+}
+
+// Treinos, histórico, pesos e dados do corpo da conta (aba dados, historico_peso e as colunas de
+// peso, altura e nascimento). Usado por "Apagar todos os dados" e por "Excluir minha conta".
+function eraseTrainingData_(u) {
+  removeRows_(u.id, null);
+  removeWhere_('weights', function (r) { return r.userId === u.id; });
+  updateAccount_(u, { pesoAtual: '', altura: '', dataNascimento: '', idade: '' });
+}
+
+// Exclui a conta de vez: libera a vaga na academia, apaga dados, histórico de treinos montados pelo
+// treinador, sessões e, por último, a linha da conta (se algo falhar no meio, dá para tentar de novo).
+// Ficam só registros sem nenhum dado pessoal, ligados a um id que não existe mais: vínculos antigos,
+// resgates de código (contagem de usos) e assinaturas (registro de pagamento).
+function deleteAccount_(u) {
+  var stamp = now_();
+  table_('links').rows.forEach(function (l) {
+    if (l.userId === u.id && up_(l.status) === 'ATIVO') patch_('links', l, { status: 'INATIVO', dataSaida: stamp, motivoSaida: 'CONTA_EXCLUIDA' });
+  });
+  eraseTrainingData_(u);
+  removeWhere_('workoutLog', function (r) { return r.userId === u.id; });
+  removeWhere_('sessions', function (r) { return r.userId === u.id && r.tipo !== 'treinador'; });
+  removeWhere_('users', function (r) { return r.id === u.id; });
+}
+
+// Remove as linhas em que fn(linha) é verdadeiro, reescrevendo a aba de uma vez (como removeRows_).
+// Os textos passam de novo por cell_: um texto começando com = + - @ não pode virar fórmula.
+function removeWhere_(which, fn) {
+  var t = table_(which);
+  var drop = {};
+  var n = 0;
+  t.rows.forEach(function (r) { if (fn(r)) { drop[r._row] = true; n++; } });
+  if (!n) return 0;
+  var values = t.sh.getDataRange().getValues();
+  var keep = values.filter(function (row, i) { return !drop[i + 1]; })
+    .map(function (row, i) { return i === 0 ? row : row.map(cell_); });
+  t.sh.getRange(1, 1, values.length, values[0].length).clearContent();
+  t.sh.getRange(1, 1, keep.length, keep[0].length).setValues(keep);
+  delete REQ[which];
+  return n;
 }
 
 // Contas criadas antes da confirmação de e-mail continuam entrando normalmente: LEGADO.
