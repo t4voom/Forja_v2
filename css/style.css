@@ -2487,6 +2487,25 @@ button.row[disabled] { opacity: 0.45; pointer-events: none; }
 .auth .field-error[data-warn] { min-height: 0; margin-top: 12px; }
 .auth .nowrap { white-space: nowrap; }
 
+/* Instalar o FORJA (passo a passo) */
+.install-steps { display: grid; gap: 18px; padding: 4px 0 8px; }
+[data-action="install"] .row-icon { color: var(--accent); }
+.install-steps li { display: flex; align-items: flex-start; gap: 14px; font-size: 17px; line-height: 1.4; }
+.install-steps b { font-weight: 600; }
+.install-num {
+  flex: none;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 700;
+  margin-top: -2px;
+}
+.install-glyph { display: inline-grid; place-items: center; vertical-align: -3px; color: var(--accent); }
+.install-glyph.is-vertical svg { transform: rotate(90deg); } /* ⋮ do Chrome no Android */
+
 /* ==========================================================================
    Planos
    ========================================================================== */
