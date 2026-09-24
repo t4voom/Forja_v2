@@ -70,5 +70,26 @@
     footer.addEventListener('click', () => sheet.close('done'));
   }
 
-  global.PWA = { canOffer, install, installed };
+  /* ---------- Versão nova publicada ----------
+     O app instalado (principalmente no iPhone) fica aberto em segundo plano e, ao voltar para ele,
+     a página não recarrega: sem isto, a versão nova só apareceria quando o sistema fechasse o app. */
+  const version = () => ((document.querySelector('script[src*="?v="]') || {}).src || '').split('?v=')[1] || '';
+  let lastCheck = Date.now();
+  let offered = '';
+
+  async function checkForUpdate() {
+    if (Date.now() - lastCheck < 60000 || navigator.onLine === false || !/^https?:$/.test(location.protocol)) return;
+    lastCheck = Date.now();
+    try {
+      const html = await (await fetch(location.pathname, { cache: 'no-cache' })).text();
+      const latest = (html.match(/\?v=([0-9a-z]+)/i) || [])[1];
+      if (!latest || latest === version() || latest === offered) return;
+      offered = latest;
+      UI.toast('Nova versão do FORJA disponível.', { iconName: 'sparkle', action: 'Atualizar', onAction: () => location.reload(), duration: 12000 });
+    } catch (e) { /* sem internet: confere na próxima vez */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });
+  global.addEventListener('online', checkForUpdate);
+
+  global.PWA = { canOffer, install, installed, checkForUpdate };
 })(window);

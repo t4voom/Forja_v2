@@ -1,7 +1,8 @@
 /* FORJA — service worker
    · Deixa o app abrir sem internet: guarda no aparelho a página e os arquivos que ela usa.
      - Página (index.html): internet primeiro, para abrir sempre a versão mais nova. Sem internet,
-       ou com sinal ruim (mais de NAV_TIMEOUT), abre a cópia guardada.
+       ou com sinal ruim (mais de NAV_TIMEOUT), abre a cópia guardada. A página sempre é conferida com
+       o servidor (o GitHub Pages deixa o navegador reaproveitá-la por 10 min, o que atrasava as versões novas).
      - Arquivos com ?v=... (js, css): do aparelho. Cada versão tem um endereço próprio, então nunca fica velho.
      - A lista de arquivos vem do próprio index.html: publicar uma versão nova (trocar o ?v=) já basta.
    · Não mexe nas chamadas ao Google Planilhas (POST para o Apps Script, outro endereço) nem em
@@ -68,17 +69,17 @@ self.addEventListener('fetch', (e) => {
 });
 
 async function openPage(e) {
-  const network = fetch(e.request);
+  // "no-cache": confere com o servidor se a página mudou (se não mudou, a resposta é mínima)
+  const network = fetch(SCOPE, { cache: 'no-cache' });
   // Com internet, atualiza a cópia guardada sem atrasar a abertura
   e.waitUntil(network.then((res) => saveShell(res.clone())).catch(() => {}));
   const saved = await caches.match(SCOPE);
-  if (!saved) return network;
-  const slow = new Promise((resolve) => setTimeout(resolve, NAV_TIMEOUT, null));
+  const slow = new Promise((resolve) => setTimeout(resolve, saved ? NAV_TIMEOUT : 60000, null));
   try {
     const res = await Promise.race([network, slow]);
-    if (res && res.ok) return res;
+    if (res && res.ok) return res.redirected ? new Response(await res.clone().blob(), { status: 200, headers: res.headers }) : res;
   } catch (err) { /* sem internet */ }
-  return saved;
+  return saved || fetch(e.request);
 }
 
 async function fromDevice(req) {
