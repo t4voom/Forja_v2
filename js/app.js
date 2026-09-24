@@ -126,8 +126,9 @@
       const live = Sessions.active();
       const history = Sessions.all();
       const week = Statistics.calculateWeeklyStats(history);
-      const streak = Statistics.streakInfo(history);
-      const insights = Statistics.generateInsights(history, Store.get('bodyweight'));
+      const cardio = global.Cardio.all();
+      const streak = Statistics.streakInfo(history.concat(cardio));
+      const insights = Statistics.generateInsights(history, Store.get('bodyweight'), new Date(), { cardio });
       // O alerta de equilíbrio mais importante entra primeiro nos insights
       const balance = global.Plans.isPremium() ? global.Balance.topAlert(history) : null;
       if (balance) insights.unshift({ icon: 'balance', text: balance.title, go: 'progress/balance' });
@@ -194,7 +195,8 @@
                 <span class="stat-label">Treinando</span>
               </div>
             </div>
-            ${week.count ? '' : '<p class="t-footnote mt-6">Sua semana começa no primeiro treino.</p>'}
+            ${week.count || global.Cardio.weekSummary().count ? '' : '<p class="t-footnote mt-6">Sua semana começa no primeiro treino.</p>'}
+            ${global.Cardio.homeHTML()}
           </div>
 
           ${streak.days || insights.length ? `
@@ -214,6 +216,7 @@
       root.querySelectorAll('[data-action="progress"]').forEach((b) => b.addEventListener('click', () => Router.go('progress')));
       root.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => Router.go(b.dataset.go)));
       root.querySelector('[data-action="weight"]')?.addEventListener('click', () => global.Progress.openWeightSheet());
+      root.querySelectorAll('[data-cardio-new]').forEach((b) => b.addEventListener('click', () => global.Cardio.openLog()));
       root.querySelector('[data-action="snooze-weight"]')?.addEventListener('click', () => { global.Reminders.snoozeWeight(); Router.refresh(); });
       root.querySelector('[data-action="academy"]')?.addEventListener('click', () => openAcademyCode());
       root.querySelector('[data-action="hide-academy"]')?.addEventListener('click', () => {
@@ -293,7 +296,7 @@
       const p = Store.get('profile') || {};
       const s = Store.get('settings');
       const t = Statistics.calculateTotals(Sessions.all());
-      const streak = Statistics.streakInfo(Sessions.all());
+      const streak = Statistics.streakInfo(Sessions.all().concat(global.Cardio.all()));
       const vibrationSupported = typeof navigator.vibrate === 'function';
 
       const row = (key, label, value, iconName) => `
@@ -336,7 +339,7 @@
                 ${row('birthDate', 'Aniversário', p.birthDate ? fmtBirthday(p.birthDate) : '', 'gift')}
               </div>
               ${bmiOf(p) != null ? `<p class="t-footnote group-note">IMC ${U.fmtNum(bmiOf(p), 1)} · calculado com seu peso e altura atuais.</p>` : ''}
-              ${(global.Plans.account().academia || {}).vinculada ? `<p class="t-footnote group-note">Seu treinador na ${esc(global.Plans.account().academia.nome)} vê seu peso, altura, idade e os treinos que você faz (séries, cargas e esforço), mas não as suas anotações.</p>` : ''}
+              ${(global.Plans.account().academia || {}).vinculada ? `<p class="t-footnote group-note">Seu treinador na ${esc(global.Plans.account().academia.nome)} vê seu peso, altura, idade, os treinos que você faz (séries, cargas e esforço) e o seu cardio, mas não as suas anotações.</p>` : ''}
             </div>
 
             <div class="section" style="--i:2">
@@ -445,6 +448,14 @@
                   </span>
                   ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
                 </button>` : ''}
+                <button class="row" data-action="export">
+                  <span class="row-icon">${icon('download', { size: 20 })}</span>
+                  <span class="row-main">
+                    <span class="row-title block">Baixar meus dados</span>
+                    <span class="row-sub block">Arquivo completo ou planilha dos treinos.</span>
+                  </span>
+                  ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
+                </button>
                 <button class="row is-danger" data-action="reset">
                   <span class="row-icon">${icon('trash', { size: 20 })}</span>
                   <span class="row-main row-title">Apagar todos os dados</span>
@@ -494,6 +505,7 @@
       root.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => Profile.edit(b.dataset.edit)));
       root.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => Router.go(b.dataset.go)));
       root.querySelector('[data-action="reset"]').addEventListener('click', Profile.confirmReset);
+      root.querySelector('[data-action="export"]').addEventListener('click', () => global.DataExport.open());
       root.querySelector('[data-action="install"]')?.addEventListener('click', () => global.PWA.install());
       root.querySelector('[data-action="password"]')?.addEventListener('click', Profile.changePassword);
       root.querySelector('[data-action="delete-account"]')?.addEventListener('click', Profile.deleteAccount);

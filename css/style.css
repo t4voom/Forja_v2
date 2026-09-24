@@ -66,6 +66,7 @@
   --danger: #FF453A;
   --success: #30D158;
   --blue: #0A84FF; --green: #30D158; --red: #FF453A; --purple: #BF5AF2; --pink: #FF375F;
+  --cardio: #FF375F; --cardio-ink: #FF6482;   /* cardio: preenchimento e texto (texto mais claro para ler no escuro) */
   --indigo: #5E5CE6; --teal: #40C8E0; --yellow: #FFD60A; --gray: #8E8E93; --orange: #FF9F0A;
   color-scheme: dark;
 }
@@ -105,6 +106,7 @@
   --danger: #FF3B30;
   --success: #34C759;
   --blue: #007AFF; --green: #34C759; --red: #FF3B30; --purple: #AF52DE; --pink: #FF2D55;
+  --cardio: #FF2D55; --cardio-ink: #C8003A;   /* texto escurecido para ler bem sobre branco */
   --indigo: #5856D6; --teal: #30B0C7; --yellow: #FFCC00; --gray: #8E8E93; --orange: #FF9500;
   color-scheme: light;
 }
@@ -3060,3 +3062,53 @@ button.row:active, a.row:active, .row.is-tappable:active { background: var(--fil
   .hero-foot .btn { padding-left: 16px; padding-right: 16px; }
 }
 .nudge-icon.is-accent { background: var(--accent-soft); color: var(--accent); }
+
+/* ==========================================================================
+   Cardio (cardio.js) — rosa, a cor de "coração" do iOS, para separar do laranja da musculação
+   ========================================================================== */
+.hist-date.is-cardio { --tint: var(--cardio); }
+.cardio-kind { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; font-size: 12px; font-weight: 600; letter-spacing: normal; color: var(--cardio-ink); vertical-align: 1px; }
+.nudge-icon.is-cardio { background: var(--cardio); color: #fff; }
+.empty-icon.is-cardio { color: var(--cardio); }
+[data-go="progress/cardio"] .row-icon { --ic: var(--cardio); }
+[data-action="export"] .row-icon { color: var(--accent); }
+.cal-day.is-cardio i { background: var(--cardio); }
+.cal-session.is-cardio { --tint: var(--cardio); }
+.kpi-approx { font-size: 0.55em; font-weight: 600; color: var(--text-2); margin-right: 3px; }
+
+/* Home: "Cardio esta semana" — o cartão inteiro abre a tela; o botão registra */
+.cardio-home { padding-right: 10px; }
+.cardio-home-main { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; text-align: left; color: var(--text); }
+.cardio-home-main:active { opacity: 0.6; }
+.cardio-home .row-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nudge.cardio-home .btn-sm { background: color-mix(in srgb, var(--cardio) 16%, transparent); color: var(--cardio-ink); }
+
+/* Evolução: resumo do período */
+.cardio-card { display: flex; align-items: center; gap: 12px; padding: 16px 16px 16px 18px; }
+.cardio-card-main { display: block; flex: 1; min-width: 0; text-align: left; color: var(--text); }
+.cardio-card-main:active { opacity: 0.6; }
+.cardio-card .chart-headline { margin: 2px 0 4px; }
+.cardio-card-period { display: block; font-size: 13px; color: var(--text-2); }
+.cardio-card-facts { display: block; font-size: 14px; line-height: 1.35; color: var(--text-2); }
+.cardio-card .btn-sm { flex: none; background: color-mix(in srgb, var(--cardio) 16%, transparent); color: var(--cardio-ink); }
+
+/* Formulário */
+.cardio-live { min-height: 18px; margin: 8px 4px 0; font-size: 14px; font-weight: 600; color: var(--cardio-ink); }
+.cardio-live:empty { min-height: 0; margin: 0; }
+
+/* Tela de cardio */
+.cardio-act-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.cardio-act-top .row-title { min-width: 0; }
+.cardio-act .meter { width: 100%; }
+.chart[data-chart="cardio"] .ch-bar { fill: var(--cardio); }
+.cardio-act .meter > span { background: var(--cardio); }
+.cardio-act .meter { background: color-mix(in srgb, var(--cardio) 16%, var(--surface-2)); }
+.cardio-bests { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@media (min-width: 560px) { .cardio-bests { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cardio-best { padding: 16px 18px; }
+.cardio-best-name { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 17px; font-weight: 600; }
+.cardio-best-list { display: grid; gap: 12px; margin-top: 14px; }
+.cardio-best-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label value" "date value"; column-gap: 12px; align-items: center; }
+.cardio-best-list dt { grid-area: label; font-size: 14px; color: var(--text-2); }
+.cardio-best-list dd.num { grid-area: value; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; text-align: right; }
+.cardio-best-date { grid-area: date; font-size: 12px; color: var(--text-3); }

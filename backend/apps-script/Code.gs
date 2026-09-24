@@ -93,7 +93,7 @@ var MAIL_MAX_PER_HOUR = 5;     // e-mails de conta por conta/endereço por hora
 // privacidade@forja.example). Troque pelos reais antes de divulgar e atualize esta data.
 var TERMS_VERSION = '2026-09-24';
 // Chaves que o app pode gravar (qualquer outra é recusada)
-var DATA_KEYS = ['meta', 'profile', 'settings', 'workouts', 'exercises', 'favorites', 'sessions', 'active', 'bodyweight', 'goals', 'program', 'reminders'];
+var DATA_KEYS = ['meta', 'profile', 'settings', 'workouts', 'exercises', 'favorites', 'sessions', 'cardio', 'active', 'bodyweight', 'goals', 'program', 'reminders'];
 // Cores aceitas nos treinos (as mesmas de js/workouts.js)
 var WORKOUT_COLORS = ['#E8853D', '#E5B454', '#E5675A', '#5E9EFF', '#4CC38A', '#A78BFA', '#8E8E93'];
 
@@ -487,7 +487,7 @@ var ACTIONS = {
   trainerStudent: function (req) {
     var ctx = trainerCtx_(req, 'alunos.ver');
     var u = studentOf_(ctx, req.userId);
-    var got = readKeys_([u.id], ['workouts', 'exercises', 'sessions', 'bodyweight'])[u.id] || { data: {} };
+    var got = readKeys_([u.id], ['workouts', 'exercises', 'sessions', 'cardio', 'bodyweight'])[u.id] || { data: {} };
     var d = got.data;
     var canBody = ctx.perms.indexOf('alunos.dadosFisicos') >= 0;
     var canWeight = ctx.perms.indexOf('alunos.peso') >= 0;
@@ -522,7 +522,7 @@ var ACTIONS = {
       treinos: (Array.isArray(d.workouts) ? d.workouts : []).slice().sort(byOrder_),
       exerciciosPersonalizados: (Array.isArray(d.exercises) ? d.exercises : []).map(function (e) { return { id: e.id, name: e.name, muscle: e.muscle, equipment: e.equipment }; }),
       sessoes: sessions,
-      analise: studentAnalysis_(d.sessions),
+      analise: studentAnalysis_(d.sessions, d.cardio),
       alteracoes: academyLog_(ctx.academy.id, 30, u.id)
     };
   },
@@ -1357,7 +1357,7 @@ function studentOf_(ctx, userId) {
    ========================================================================== */
 var DAY_MS = 86400000;
 
-function studentAnalysis_(sessions) {
+function studentAnalysis_(sessions, cardio) {
   var nowMs = Date.now();
   var list = (Array.isArray(sessions) ? sessions : []).filter(function (s) { return s && toDate_(s.startedAt); })
     .sort(function (a, b) { return cmpAsc_(a.startedAt, b.startedAt); });
@@ -1373,6 +1373,8 @@ function studentAnalysis_(sessions) {
     return { s: s, t: toDate_(s.startedAt).getTime(), day: day_(s.startedAt), sets: sets, volume: volume };
   });
   var inDays = function (from, to) { return info.filter(function (x) { return x.t > nowMs - from * DAY_MS && x.t <= nowMs - to * DAY_MS; }); };
+  var cardioInfo = cardioEntries_(cardio);
+  var cardioIn = function (from, to) { return cardioInfo.filter(function (x) { return x.t > nowMs - from * DAY_MS && x.t <= nowMs - to * DAY_MS; }); };
   var sum = function (arr, k) { return arr.reduce(function (n, x) { return n + (x[k] || 0); }, 0); };
   var last30 = inDays(30, 0), prev30 = inDays(60, 30);
   var withTime = last30.filter(function (x) { return Number(x.s.durationSec) > 0; });
@@ -1381,7 +1383,7 @@ function studentAnalysis_(sessions) {
   // 12 semanas (segunda a domingo), da mais antiga para a atual
   var thisWeek = weekStart_(day_(new Date()));
   var weeks = [];
-  for (var w = 11; w >= 0; w--) weeks.push({ inicio: shiftDay_(thisWeek, -7 * w), treinos: 0, series: 0, volume: 0 });
+  for (var w = 11; w >= 0; w--) weeks.push({ inicio: shiftDay_(thisWeek, -7 * w), treinos: 0, series: 0, volume: 0, cardioMin: 0 });
   var weekIndex = {};
   weeks.forEach(function (x, i) { weekIndex[x.inicio] = i; });
   var days = {};
@@ -1395,7 +1397,17 @@ function studentAnalysis_(sessions) {
       d.series += x.sets;
     }
   });
-  weeks.forEach(function (x) { x.volume = Math.round(x.volume); });
+  // Cardio: minutos por semana e dias com cardio no calendário
+  cardioInfo.forEach(function (x) {
+    var i = weekIndex[weekStart_(x.day)];
+    if (i !== undefined) weeks[i].cardioMin += x.sec / 60;
+    if (x.day >= firstDay) {
+      var d = days[x.day] = days[x.day] || { dia: x.day, treinos: 0, series: 0 };
+      d.cardioMin = (d.cardioMin || 0) + x.sec / 60;
+    }
+  });
+  weeks.forEach(function (x) { x.volume = Math.round(x.volume); x.cardioMin = Math.round(x.cardioMin); });
+  Object.keys(days).forEach(function (k) { if (days[k].cardioMin) days[k].cardioMin = Math.round(days[k].cardioMin); });
 
   // Semanas seguidas com pelo menos um treino (a atual conta se já tiver treino)
   var trained = {};
@@ -1405,6 +1417,9 @@ function studentAnalysis_(sessions) {
 
   var ex = exerciseProgress_(info, nowMs);
   var lastSession = info.length ? info[info.length - 1].s.startedAt : '';
+  var lastCardio = cardioInfo.length ? cardioInfo[cardioInfo.length - 1].c.startedAt : '';
+  var cardio30 = cardioIn(30, 0);
+  var sumMin = function (arr) { return Math.round(arr.reduce(function (n, x) { return n + x.sec; }, 0) / 60); };
   return {
     hoje: day_(new Date()),
     resumo: {
@@ -1416,7 +1431,10 @@ function studentAnalysis_(sessions) {
       rpeMedio30: rated.length ? round_(rated.reduce(function (n, x) { return n + Number(x.s.rpe); }, 0) / rated.length, 1) : null,
       rpeAvaliados30: rated.length,
       ultimoTreino: iso_(lastSession), totalTreinos: info.length, primeiroTreino: info.length ? iso_(info[0].s.startedAt) : '',
-      semanasSeguidas: streak
+      semanasSeguidas: streak,
+      ultimoCardio: iso_(lastCardio),
+      cardio30: cardio30.length, cardioMin30: sumMin(cardio30), cardioMin30Anterior: sumMin(cardioIn(60, 30)),
+      cardioKm30: round_(cardio30.reduce(function (n, x) { return n + x.km; }, 0), 1)
     },
     semanas: weeks,
     dias: Object.keys(days).sort().map(function (k) { return days[k]; }),
@@ -1425,6 +1443,7 @@ function studentAnalysis_(sessions) {
     recordes: ex.records,
     seriesExercicio28: ex.sets28,
     treinosUso: workoutUsage_(info, nowMs),
+    cardio: cardioSummary_(cardioInfo, nowMs),
     sessoes: info.slice(-30).reverse().map(function (x) {
       return {
         id: x.s.id, workoutId: x.s.workoutId || '', treino: str_(x.s.name, 60) || 'Treino', data: iso_(x.s.startedAt),
@@ -1501,6 +1520,42 @@ function exerciseProgress_(info, nowMs) {
   top.forEach(function (e) { delete e.ultimo; });
   records.sort(function (a, b) { return cmpDesc_(a.data, b.data); });
   return { top: top, stalled: stalled, records: records.slice(0, 10), sets28: Object.keys(sets28).map(function (k) { return sets28[k]; }) };
+}
+
+// Cardio do aluno (aba "dados", chave "cardio"). Vai para o treinador: tipo, data, duração, distância e esforço.
+// Calorias e observações ficam só com o aluno.
+function cardioEntries_(list) {
+  return (Array.isArray(list) ? list : []).filter(function (c) { return c && toDate_(c.startedAt) && num_(c.durationSec) > 0; })
+    .map(function (c) {
+      var activity = /^[a-z-]{1,20}$/.test(String(c.activity || '')) ? String(c.activity) : 'outro';
+      var km = num_(c.distanceKm);
+      return {
+        c: c, t: toDate_(c.startedAt).getTime(), day: day_(c.startedAt), activity: activity,
+        nome: activity === 'outro' ? str_(c.name, 30) : '',
+        sec: Math.min(36000, Math.round(num_(c.durationSec))), km: km > 0 && km < 1000 ? km : 0, rpe: int_(c.rpe, 1, 10)
+      };
+    })
+    .sort(function (a, b) { return a.t - b.t; });
+}
+
+function cardioSummary_(entries, nowMs) {
+  var by = {};
+  entries.filter(function (x) { return x.t > nowMs - 30 * DAY_MS; }).forEach(function (x) {
+    var k = x.activity + '|' + x.nome.toLowerCase();
+    var a = by[k] = by[k] || { atividade: x.activity, nome: x.nome, vezes: 0, minutos: 0, distanciaKm: 0 };
+    a.vezes++;
+    a.minutos += x.sec / 60;
+    a.distanciaKm += x.km;
+  });
+  var porAtividade = Object.keys(by).map(function (k) { var a = by[k]; a.minutos = Math.round(a.minutos); a.distanciaKm = round_(a.distanciaKm, 1); return a; })
+    .sort(function (a, b) { return b.minutos - a.minutos; });
+  return {
+    total: entries.length,
+    porAtividade30: porAtividade,
+    recentes: entries.slice(-15).reverse().map(function (x) {
+      return { atividade: x.activity, nome: x.nome, data: iso_(x.c.startedAt), duracaoSeg: x.sec, distanciaKm: x.km ? round_(x.km, 2) : null, rpe: x.rpe };
+    })
+  };
 }
 
 // Treinos montados: quantas vezes foram feitos nos últimos 30 dias e quando foi a última vez

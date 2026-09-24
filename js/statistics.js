@@ -65,7 +65,8 @@
   /* ---------- Sequência ----------
      Quase ninguém treina todos os dias, então a sequência não quebra com folgas curtas:
      ela continua enquanto você não passa mais de STREAK_MAX_GAP dias seguidos sem treinar.
-     O número conta os dias corridos do primeiro ao último treino da sequência atual. */
+     O número conta os dias corridos do primeiro ao último treino da sequência atual.
+     Recebe qualquer lista com startedAt: as telas passam treinos + cardio (dia de cardio também conta). */
   const STREAK_MAX_GAP = 2;
   const keyToDate = (k) => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
   const diffDays = (a, b) => Math.round((global.U.startOfDay(b) - global.U.startOfDay(a)) / DAY);
@@ -392,7 +393,8 @@
     return { date: null, current: 0 };
   }
 
-  // Cada conquista guarda a data exata em que foi alcançada (recalculada do histórico)
+  // Cada conquista guarda a data exata em que foi alcançada (recalculada do histórico).
+  // ctx.cardio: dias de cardio também contam na sequência (as demais conquistas são de musculação)
   function evaluateAchievements(sessions, ctx = {}) {
     const asc = [...sessions].sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt));
     const tl = { workouts: [], volume: [], records: [], streak: [] };
@@ -404,7 +406,8 @@
     });
     groupRecords(calculatePersonalRecords(asc)).reverse().forEach((r, i) => tl.records.push({ date: r.date, value: i + 1 }));
     let chainStart = null, prev = null;
-    [...new Set(asc.map((s) => global.U.dayKey(s.startedAt)))].map(keyToDate).forEach((d) => {
+    const activeDays = asc.map((s) => global.U.dayKey(s.startedAt)).concat((ctx.cardio || []).map((c) => global.U.dayKey(c.startedAt)));
+    [...new Set(activeDays)].sort().map(keyToDate).forEach((d) => {
       if (!prev || diffDays(prev, d) - 1 > STREAK_MAX_GAP) chainStart = d;
       prev = d;
       tl.streak.push({ date: d.toISOString(), value: diffDays(chainStart, d) + 1 });
@@ -427,16 +430,24 @@
   }
 
   /* ---------- Insights ----------
-     Frases calculadas só a partir dos dados salvos. Nada inventado, nada de diagnóstico. */
-  function generateInsights(sessions, bodyweight = [], ref = new Date()) {
+     Frases calculadas só a partir dos dados salvos. Nada inventado, nada de diagnóstico.
+     cardio (opcional): registros de cardio, para o tempo de cardio da semana e a folga desde a última atividade. */
+  function generateInsights(sessions, bodyweight = [], ref = new Date(), { cardio = [] } = {}) {
     const U = global.U;
     const out = [];
-    if (!sessions.length) return out;
     const now = ref.getTime();
+    const weekStart = U.startOfWeek(ref).getTime();
+    const cardioWeek = cardio.filter((c) => { const t = new Date(c.startedAt).getTime(); return t >= weekStart && t < weekStart + 7 * DAY; });
+    const cardioMin = Math.round(cardioWeek.reduce((n, c) => n + (c.durationSec || 0), 0) / 60);
+    if (!sessions.length) {
+      if (cardioMin) out.push({ icon: 'heartPulse', text: `Você fez ${cardioMin} min de cardio esta semana.` });
+      return out;
+    }
     const vol = (from, to) => summarize(inRange(sessions, from, to)).volume;
 
     const week = calculateWeeklyStats(sessions, ref);
     if (week.count) out.push({ icon: 'calendar', text: `Você treinou ${week.count === 1 ? '1 vez' : `${week.count} vezes`} esta semana.` });
+    if (cardioMin) out.push({ icon: 'heartPulse', text: `Você fez ${cardioMin} min de cardio esta semana.` });
 
     const v1 = vol(now - 7 * DAY, now + 1), v0 = vol(now - 14 * DAY, now - 7 * DAY);
     if (v0 > 0 && v1 > 0) {
@@ -474,7 +485,8 @@
       out.push({ icon: 'bolt', text: `${best.name} está evoluindo: ${best.useE1 ? '1RM estimado' : 'carga'} de ${fmt(best.from)} para ${fmt(best.to)} em ${best.weeks === 1 ? '1 semana' : `${best.weeks} semanas`}.` });
     }
 
-    const lastDay = Math.max(...sessions.map((s) => new Date(s.startedAt).getTime()));
+    // Folga desde a última atividade (treino ou cardio)
+    const lastDay = Math.max(...sessions.concat(cardio).map((s) => new Date(s.startedAt).getTime()));
     const gap = diffDays(new Date(lastDay), ref);
     if (gap >= 5) out.push({ icon: 'info', text: `Faz ${gap} dias desde seu último treino.` });
 
