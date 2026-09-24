@@ -106,6 +106,8 @@
     token_expired: 'Este link expirou.',
     resend_too_soon: 'Você poderá solicitar um novo e-mail em alguns instantes.',
     email_unavailable: 'Não foi possível enviar e-mails agora. Tente de novo mais tarde.',
+    password_same: 'A nova senha precisa ser diferente da atual.',
+    terms_required: 'Para criar a conta, aceite os Termos de Uso e a Política de Privacidade.',
     server: 'O servidor não respondeu como esperado. Tente de novo.'
   };
   class BackendError extends Error {
@@ -118,11 +120,12 @@
   const LOCAL_ACCOUNT = Object.freeze({ tipoConta: 'FREE', origemPremium: 'NENHUMA', statusPremium: 'INATIVO', premium: { ativo: false, origem: 'NENHUMA' }, academia: { vinculada: false, id: null }, assinaturaIndividual: null, codigoPremium: null });
   const publicUser = (u) => ({ id: u.id, email: u.email, name: u.name, plan: u.plan || 'free', createdAt: u.createdAt, account: LOCAL_ACCOUNT });
 
-  function validate({ name, email, password, passwordConfirm }, { signup = false } = {}) {
+  function validate({ name, email, password, passwordConfirm, acceptTerms }, { signup = false } = {}) {
     if (signup && !String(name || '').trim()) throw new BackendError('invalid_name');
     if (!validEmail(normEmail(email))) throw new BackendError('invalid_email');
     if (String(password || '').length < 6) throw new BackendError(signup ? 'weak_password' : 'invalid_login');
     if (signup && passwordConfirm !== undefined && passwordConfirm !== password) throw new BackendError('password_mismatch');
+    if (signup && acceptTerms === false) throw new BackendError('terms_required');
   }
 
   /* ==========================================================================
@@ -133,8 +136,8 @@
     accounts: () => readJSON(ACCOUNTS_KEY, []),
     save(list) { if (!writeJSON(ACCOUNTS_KEY, list)) throw new BackendError('server', 'Não foi possível salvar neste aparelho.'); },
 
-    async register({ name, email, password, passwordConfirm }) {
-      validate({ name, email, password, passwordConfirm }, { signup: true });
+    async register({ name, email, password, passwordConfirm, acceptTerms }) {
+      validate({ name, email, password, passwordConfirm, acceptTerms }, { signup: true });
       const list = Local.accounts();
       email = normEmail(email);
       if (list.some((a) => a.email === email)) throw new BackendError('email_taken');
@@ -172,6 +175,8 @@
     async requestPasswordReset() { throw new BackendError('server_only'); },
     async checkPasswordReset() { throw new BackendError('server_only'); },
     async confirmPasswordReset() { throw new BackendError('server_only'); },
+    async changePassword() { throw new BackendError('server_only'); },
+    async deleteAccount() { throw new BackendError('server_only'); },
 
     // Os dados já vivem no aparelho: não há o que baixar nem enviar
     async pull() { return null; },
@@ -203,7 +208,7 @@
 
   const Sheets = {
     name: 'sheets',
-    async register(d) { validate(d, { signup: true }); return call('register', { name: d.name, email: normEmail(d.email), password: d.password, passwordConfirm: d.passwordConfirm }); },
+    async register(d) { validate(d, { signup: true }); return call('register', { name: d.name, email: normEmail(d.email), password: d.password, passwordConfirm: d.passwordConfirm, acceptTerms: d.acceptTerms === true }); },
     async login(d) { validate(d); return call('login', { email: normEmail(d.email), password: d.password }); },
     async me(token) { return (await call('me', { token })).user; },
     async logout(token) { await call('logout', { token }); },
@@ -218,6 +223,8 @@
     async requestPasswordReset(email) { return call('requestPasswordReset', { email: normEmail(email) }); },
     async checkPasswordReset(linkToken) { return call('checkPasswordReset', { linkToken }); },
     async confirmPasswordReset(linkToken, password, passwordConfirm) { return call('confirmPasswordReset', { linkToken, password, passwordConfirm }); },
+    async changePassword(token, current, next, nextConfirm) { return call('changePassword', { token, current, next, nextConfirm }); },
+    async deleteAccount(token, password) { return call('deleteAccount', { token, password }); },
     async pull(token, keys) { return (await call('pull', keys ? { token, keys } : { token })).data || {}; },
     // Devolve { workouts } quando o servidor preservou treinos do treinador
     async push(token, data) { return call('push', { token, data }); },
@@ -308,6 +315,17 @@
     requestPasswordReset: (email) => adapter.requestPasswordReset(email),
     checkPasswordReset: (linkToken) => adapter.checkPasswordReset(linkToken),
     confirmPasswordReset: (linkToken, password, passwordConfirm) => adapter.confirmPasswordReset(linkToken, password, passwordConfirm),
+
+    // Perfil: trocar senha (os outros aparelhos saem) e excluir a conta (apaga tudo no servidor)
+    async changePassword(current, next, nextConfirm) {
+      if (String(next || '').length < 6) throw new BackendError('weak_password');
+      if (next !== nextConfirm) throw new BackendError('password_mismatch');
+      return adapter.changePassword(requireToken(), current, next, nextConfirm);
+    },
+    async deleteAccount(password) {
+      await adapter.deleteAccount(requireToken(), password);
+      forgetSession();
+    },
 
     pull: (keys) => adapter.pull(token(), keys),
     push: (data) => adapter.push(token(), data),

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="Como o FORJA trata os seus dados pessoais.">
+  <title>Política de Privacidade · FORJA</title>
+  <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
+  <!-- Mesmo tema do app (escuro, claro ou do sistema) -->
+  <script>
+    (function () {
+      try {
+        var sess = JSON.parse(localStorage.getItem('forja.session') || 'null');
+        var key = sess && sess.user ? 'forja.u.' + sess.user.id + '.settings' : 'forja.settings';
+        var t = (JSON.parse(localStorage.getItem(key) || '{}').theme) || 'dark';
+        if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="css/style.css?v=20260924c">
+  <link rel="stylesheet" href="css/base.css?v=20260924c">
+</head>
+<body>
+  <!--
+    ⚠️ PENDENTE (LGPD) — NÃO ESQUECER ANTES DE DIVULGAR O APP
+    "Equipe FORJA" e "privacidade@forja.example" são PROVISÓRIOS, só para a página ficar apresentável.
+    Trocar pelo nome do responsável (pessoa ou razão social + CNPJ) e por um e-mail de contato real,
+    que alguém leia. Procure por "PENDENTE" neste arquivo e em termos.html / privacidade.html.
+    Depois de trocar, atualize "Última atualização" e a constante TERMS_VERSION do Code.gs.
+  -->
+  <main class="legal">
+    <a class="legal-back" href="./">Abrir o FORJA</a>
+    <p class="wordmark t-accent mt-10">FORJA</p>
+    <h1 class="t-large-title mt-4">Política de Privacidade</h1>
+    <p class="legal-date">Última atualização: 24 de setembro de 2026</p>
+
+    <p>Esta política explica quais dados pessoais o FORJA coleta, para que eles servem, com quem são compartilhados e como você controla tudo isso, de acordo com a Lei Geral de Proteção de Dados (LGPD, Lei nº 13.709/2018).</p>
+
+    <h2>1. Quem é o responsável pelos seus dados</h2>
+    <p>O FORJA é mantido pela Equipe FORJA<!-- PENDENTE: nome provisório (com o nome real: "mantido por Fulano") -->, que é o controlador dos dados pessoais tratados no app. Para qualquer assunto sobre privacidade, fale com a gente pelo e-mail <a href="mailto:privacidade@forja.example">privacidade@forja.example</a><!-- PENDENTE: e-mail provisório -->.</p>
+
+    <h2>2. Quais dados coletamos</h2>
+    <ul>
+      <li><b>Conta:</b> nome, e-mail e senha. A senha nunca é guardada: guardamos só uma versão cifrada e irreversível dela (<i>hash</i>).</li>
+      <li><b>Perfil e corpo (opcionais):</b> peso, altura, data de nascimento ou idade, objetivo e nível de experiência, e o histórico do seu peso.</li>
+      <li><b>Treinos:</b> treinos que você cria, exercícios, séries, repetições, cargas, duração, recordes, metas, programa em andamento, lembretes e preferências do app.</li>
+      <li><b>Academia e Premium:</b> o código da academia que você usou, a data de entrada e de saída, códigos Premium resgatados e assinaturas registradas.</li>
+      <li><b>Dados técnicos da conta:</b> data de criação, último acesso, confirmação do e-mail e o registro de que você aceitou estes termos (data e versão).</li>
+    </ul>
+    <p>O app também guarda uma cópia dos seus dados no próprio aparelho, para funcionar sem internet. O FORJA <b>não usa cookies de publicidade nem ferramentas de rastreamento ou de análise de terceiros</b>.</p>
+
+    <h2>3. Para que usamos e com qual base legal</h2>
+    <ul>
+      <li><b>Criar e manter sua conta</b>, permitir o login, confirmar seu e-mail e recuperar sua senha: execução do contrato com você (art. 7º, V, da LGPD).</li>
+      <li><b>Guardar e sincronizar seus treinos</b> e mostrar sua evolução: execução do contrato (art. 7º, V).</li>
+      <li><b>Dados do corpo</b> (peso, altura e idade) servem para calcular o IMC e acompanhar sua evolução. Como são dados ligados à saúde, só os tratamos com o seu consentimento (art. 11, I), que você dá ao informá-los no app. Eles são opcionais, e você pode apagá-los quando quiser.</li>
+      <li><b>Liberar funções do seu plano</b> (Free ou Premium) e, se você entrar numa academia, <b>compartilhar seus dados com ela</b> (veja o item 4): execução do contrato.</li>
+      <li><b>Enviar e-mails sobre a sua conta</b> (confirmação de e-mail e nova senha). Não enviamos propaganda sem a sua autorização.</li>
+      <li><b>Segurança e prevenção de abusos</b>, como o bloqueio temporário depois de várias senhas erradas e os limites de envio de e-mails: legítimo interesse (art. 7º, IX).</li>
+      <li><b>Cumprir obrigações legais</b> e atender pedidos de autoridades: art. 7º, II.</li>
+    </ul>
+
+    <h2>4. Com quem compartilhamos</h2>
+    <ul>
+      <li><b>Sua academia, somente se você entrar com o código dela.</b> Os treinadores e gestores dessa academia passam a ver seu nome, e-mail, idade, peso, altura, IMC e histórico de peso, seus treinos e um resumo dos treinos que você fez (data, duração, exercícios e séries), e podem criar e alterar treinos para você. Quando você sai da academia (ou ela encerra o vínculo), esse acesso termina.</li>
+      <li><b>Prestadores de serviço</b> que tratam os dados em nosso nome: o <b>Google</b>, onde os dados ficam guardados (Google Planilhas e Google Drive) e de onde saem os e-mails (Google Apps Script), e o <b>GitHub</b>, que hospeda o site do app.</li>
+      <li><b>Autoridades</b>, quando a lei exigir.</li>
+    </ul>
+    <p><b>Não vendemos nem alugamos seus dados.</b></p>
+
+    <h2>5. Transferência para outros países</h2>
+    <p>Os servidores do Google e do GitHub podem ficar fora do Brasil. Essa transferência acontece para prestar o serviço (art. 33 da LGPD) e segue as garantias de proteção de dados oferecidas por esses provedores.</p>
+
+    <h2>6. Por quanto tempo guardamos</h2>
+    <ul>
+      <li>Enquanto sua conta existir.</li>
+      <li><b>Excluir minha conta</b> (Perfil › Dados) apaga na hora sua conta, seus treinos, seu histórico e os dados do corpo, e encerra o vínculo com a academia.</li>
+      <li><b>Apagar todos os dados</b> apaga treinos, histórico e dados do corpo, e mantém a conta.</li>
+      <li>Fazemos cópias de segurança diárias. Nelas, os dados apagados somem automaticamente <b>em até 30 dias</b>.</li>
+      <li>Podemos manter registros sem dados pessoais (por exemplo, quantas vezes um código foi usado) e registros de pagamento pelo prazo que a lei exigir.</li>
+    </ul>
+
+    <h2>7. Seus direitos</h2>
+    <p>Pela LGPD (art. 18), você pode pedir: confirmação de que tratamos seus dados e acesso a eles; correção de dados incompletos ou errados; anonimização, bloqueio ou eliminação de dados desnecessários; portabilidade; informação sobre com quem compartilhamos; e revogação do consentimento, entre outros.</p>
+    <p>Boa parte disso você faz direto no app: editar seus dados no Perfil, sair da academia, <b>Apagar todos os dados</b> e <b>Excluir minha conta</b>. Para o resto, escreva para <a href="mailto:privacidade@forja.example">privacidade@forja.example</a><!-- PENDENTE: e-mail provisório -->. Respondemos em até 15 dias. Você também pode reclamar à Autoridade Nacional de Proteção de Dados (ANPD), em gov.br/anpd.</p>
+
+    <h2>8. Segurança</h2>
+    <ul>
+      <li>Senhas guardadas só como <i>hash</i> (HMAC-SHA256 com um valor aleatório diferente para cada conta).</li>
+      <li>Links enviados por e-mail valem uma vez só e têm prazo: 24 horas para confirmar o e-mail e 30 minutos para criar uma nova senha.</li>
+      <li>Conexão protegida (HTTPS) e bloqueio temporário depois de várias senhas erradas.</li>
+      <li>O acesso aos dados fica restrito ao responsável pelo FORJA e, se você entrar numa, à sua academia.</li>
+    </ul>
+    <p>Nenhum sistema é totalmente seguro. Se acontecer um incidente que possa trazer risco a você, avisaremos você e a ANPD.</p>
+
+    <h2>9. Crianças e adolescentes</h2>
+    <p>O FORJA não é destinado a menores de 13 anos. Adolescentes de 13 a 17 anos só devem usar o app com a autorização e o acompanhamento dos pais ou responsáveis.</p>
+
+    <h2>10. Mudanças nesta política</h2>
+    <p>Quando esta política mudar, a nova versão será publicada nesta página, com a data de atualização. Mudanças importantes serão avisadas no app.</p>
+
+    <h2>11. Contato</h2>
+    <p>Equipe FORJA<!-- PENDENTE: nome provisório --> · <a href="mailto:privacidade@forja.example">privacidade@forja.example</a><!-- PENDENTE: e-mail provisório --></p>
+
+    <p class="legal-foot"><a href="termos.html">Termos de Uso</a> · <a href="./">Abrir o FORJA</a></p>
+  </main>
+</body>
+</html>

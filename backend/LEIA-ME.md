@@ -1,5 +1,7 @@
 # FORJA com Google Planilhas
 
+> **⚠️ PENDENTE antes de divulgar o app (LGPD):** `termos.html` e `privacidade.html` estão com o responsável **"Equipe FORJA"** e o e-mail **privacidade@forja.example**, que são **provisórios**. Troque pelo nome do responsável (pessoa, ou razão social + CNPJ) e por um e-mail de contato real — procure por `PENDENTE` nos dois arquivos. Depois, atualize "Última atualização" nas páginas e `TERMS_VERSION` no `Code.gs`. Vale também a revisão de um advogado.
+
 O Google Planilhas é o banco de dados do FORJA. O app (celular) e o **FORJA Trainer** (Dashboard web das academias) falam com o mesmo Apps Script, que valida tudo antes de gravar.
 
 ```
@@ -16,6 +18,7 @@ FORJA Trainer (web)      ┘                │ autentica, autoriza,    │     
 - Senhas nunca são gravadas: só o *hash* (HMAC-SHA256 iterado, com salt por conta e uma "pimenta" guardada nas propriedades do script).
 - A planilha ganha um **backup diário** automático no seu Google Drive (ative uma vez pelo menu). Veja [Backup diário](#backup-diário).
 - O app abre **sem internet** e pode ser **instalado** na tela inicial. Veja [App instalável e sem internet](#app-instalável-e-sem-internet).
+- **LGPD:** cadastro com aceite dos Termos de Uso e da Política de Privacidade (fica registrado), *Trocar senha* e *Excluir minha conta* no Perfil. Veja [LGPD: termos, privacidade e exclusão de conta](#lgpd-termos-privacidade-e-exclusão-de-conta).
 - Conta de aluno nova precisa **confirmar o e-mail** pelo link antes de usar o app; "Esqueci minha senha" manda um link para criar uma senha nova. Veja [Confirmação de e-mail e nova senha](#confirmação-de-e-mail-e-nova-senha).
 
 ## Instalação / atualização
@@ -78,6 +81,23 @@ Arquivos: `manifest.webmanifest`, `sw.js`, `js/pwa.js` e os ícones em `assets/i
   - No iPhone, o app instalado tem um armazenamento separado do Safari: na primeira vez, é preciso **entrar de novo** (os dados vêm da conta). Os links dos e-mails abrem no Safari; a confirmação vale para a conta e o app instalado percebe sozinho.
 - **Publicar uma versão nova continua igual:** troque o `?v=` do `index.html`. Com internet, o app abre a versão nova na hora e o aparelho troca os arquivos antigos pelos novos. Não precisa mexer no `sw.js`.
 - O service worker só cuida dos arquivos do app. As chamadas ao Apps Script nunca passam pelo cache (os dados sempre vêm do servidor), e um FORJA Trainer publicado em `/trainer/` no mesmo site não é afetado.
+
+## LGPD: termos, privacidade e exclusão de conta
+
+**Textos:** `termos.html` e `privacidade.html`, na raiz do app (ex.: `https://…/Forja_v2/termos.html`). São um **rascunho** feito a partir do que o sistema realmente faz — vale a revisão de um advogado. **PENDENTE:** o responsável ("Equipe FORJA") e o e-mail (privacidade@forja.example) são provisórios; troque pelos reais (procure por `PENDENTE` nas duas páginas).
+
+**Aceite:** o cadastro só continua com a caixa *"Li e aceito os Termos de Uso e a Política de Privacidade"* marcada (o servidor também confere). Ficam gravados em `usuarios.termosAceitosEm` (data) e `usuarios.termosVersao` (versão). Ao mudar os textos, troque a data em "Última atualização" das duas páginas **e** a constante `TERMS_VERSION` no `Code.gs`. Contas criadas antes desta versão ficam com essas colunas vazias.
+
+**No Perfil do app:**
+
+| Opção | O que faz |
+|---|---|
+| Conta › **Trocar senha** | Pede a senha atual, grava a nova (mesmo hash de sempre), invalida um link de "Esqueci minha senha" ainda aberto e **encerra as sessões dos outros aparelhos** (este continua). 5 senhas atuais erradas = o mesmo bloqueio de 15 min do login. |
+| Dados › **Apagar todos os dados** | Apaga treinos, histórico, recordes, metas, **histórico de peso** e peso/altura/nascimento. A conta, o plano e a academia continuam. (Antes, o histórico de peso e o peso/altura ficavam na planilha; agora saem também.) |
+| Dados › **Excluir minha conta** | Pede a senha. Apaga a conta (a linha de `usuarios`), a aba `dados`, o histórico de peso, o histórico de treinos montados pelo treinador e **todas as sessões**; encerra o vínculo com a academia (`motivoSaida = CONTA_EXCLUIDA`, a vaga é liberada). O e-mail fica livre para uma conta nova. |
+| Rodapé | Links para os Termos de Uso e a Política de Privacidade. |
+
+Depois de excluir a conta, sobram só registros **sem nenhum dado pessoal**, ligados a um id que não existe mais: vínculos antigos com academias (entrada/saída), resgates de código (contam os usos do código) e assinaturas (registro de pagamento). Nos backups diários, os dados apagados somem em até 30 dias.
 
 ## Confirmação de e-mail e nova senha
 
@@ -188,7 +208,7 @@ Abas existentes (colunas novas entram no fim):
 
 | Aba | Colunas |
 |---|---|
-| `usuarios` | id, email, nome, hash, salt, plano, criadoEm, planoAtualizadoEm, **tipoConta, origemPremium, statusPremium, premiumManual, academiaId, academiaNome, statusVinculoAcademia, dataEntradaAcademia, dataSaidaAcademia, dataNascimento, idade, pesoAtual, altura, ultimoAcesso, statusUsuario, emailVerificado** (`SIM`/`NAO`/`LEGADO`), **dataVerificacaoEmail, tokenVerificacaoEmailHash, tokenVerificacaoEmailExpira, tokenResetSenhaHash, tokenResetSenhaExpira** |
+| `usuarios` | id, email, nome, hash, salt, plano, criadoEm, planoAtualizadoEm, **tipoConta, origemPremium, statusPremium, premiumManual, academiaId, academiaNome, statusVinculoAcademia, dataEntradaAcademia, dataSaidaAcademia, dataNascimento, idade, pesoAtual, altura, ultimoAcesso, statusUsuario, emailVerificado** (`SIM`/`NAO`/`LEGADO`), **dataVerificacaoEmail, tokenVerificacaoEmailHash, tokenVerificacaoEmailExpira, tokenResetSenhaHash, tokenResetSenhaExpira, termosAceitosEm, termosVersao** |
 | `sessoes` | token, userId, criadoEm, expiraEm, **tipo** (`aluno` 60 dias · `treinador` 12 h) |
 | `dados` | userId, chave, parte, json, atualizadoEm |
 
@@ -224,7 +244,7 @@ Ninguém no Dashboard altera assinatura, limite da academia ou códigos: essas a
 ## Ações da API (POST `{ action, ... }`)
 
 App: `register`, `login`, `me`, `logout`, `pull` (com `keys` opcional), `push`, `clear`, `redeemPremiumCode`, `joinAcademy`, `leaveAcademy`, `setPlan` (desligada).
-Conta do aluno: `verifyEmail` (`linkToken`), `resendVerificationEmail` (`token` da sessão, ou `linkToken` vencido), `changeEmail` (`token`, `email`, `password`; só antes de confirmar), `requestPasswordReset` (`email`), `checkPasswordReset` (`linkToken`), `confirmPasswordReset` (`linkToken`, `password`, `passwordConfirm`).
+Conta do aluno: `changePassword` (`token`, `current`, `next`, `nextConfirm`), `deleteAccount` (`token`, `password`), `verifyEmail` (`linkToken`), `resendVerificationEmail` (`token` da sessão, ou `linkToken` vencido), `changeEmail` (`token`, `email`, `password`; só antes de confirmar), `requestPasswordReset` (`email`), `checkPasswordReset` (`linkToken`), `confirmPasswordReset` (`linkToken`, `password`, `passwordConfirm`).
 Dashboard: `trainerLogin`, `trainerMe`, `trainerChangePassword`, `trainerOverview`, `trainerStudents`, `trainerStudent`, `trainerSaveWorkout`, `trainerDeleteWorkout`, `trainerWorkouts`, `trainerAcademy`, `trainerUnlinkStudent`.
 Pagamento: `subscriptionWebhook` (exige `WEBHOOK_SECRET`).
 

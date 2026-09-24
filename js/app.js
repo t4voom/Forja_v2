@@ -373,6 +373,12 @@
                   <span class="row-main row-title">E-mail</span>
                   <span class="row-value truncate profile-email">${esc((global.Backend.user() || {}).email || '')}</span>
                 </div>
+                ${global.Backend.mode === 'sheets' ? `
+                <button class="row" data-action="password">
+                  <span class="row-icon">${icon('lock', { size: 20 })}</span>
+                  <span class="row-main row-title">Trocar senha</span>
+                  ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
+                </button>` : ''}
                 <button class="row" data-action="logout">
                   <span class="row-icon">${icon('logout', { size: 20 })}</span>
                   <span class="row-main row-title">Sair da conta</span>
@@ -443,11 +449,22 @@
                   <span class="row-icon">${icon('trash', { size: 20 })}</span>
                   <span class="row-main row-title">Apagar todos os dados</span>
                 </button>
+                ${global.Backend.mode === 'sheets' ? `
+                <button class="row is-danger" data-action="delete-account">
+                  <span class="row-icon">${icon('user', { size: 20 })}</span>
+                  <span class="row-main row-title">Excluir minha conta</span>
+                </button>` : ''}
               </div>
-              <p class="t-footnote group-note">${global.Backend.mode === 'sheets' ? 'Seus dados ficam na sua conta e também neste aparelho, para funcionar sem internet.' : 'Modo local: sua conta e seus dados ficam apenas neste aparelho.'}</p>
+              <p class="t-footnote group-note">${global.Backend.mode === 'sheets' ? 'Seus dados ficam na sua conta e também neste aparelho, para funcionar sem internet. Apagar os dados mantém a conta; excluir a conta apaga tudo.' : 'Modo local: sua conta e seus dados ficam apenas neste aparelho.'}</p>
             </div>
 
-            <p class="t-footnote text-center mt-14" style="--i:5"><span class="wordmark t-faint">FORJA</span></p>
+            <p class="t-footnote text-center mt-10 legal-links" style="--i:5">
+              <a href="termos.html" target="_blank" rel="noopener">Termos de Uso</a>
+              <span aria-hidden="true">·</span>
+              <a href="privacidade.html" target="_blank" rel="noopener">Política de Privacidade</a>
+            </p>
+
+            <p class="t-footnote text-center mt-8" style="--i:5"><span class="wordmark t-faint">FORJA</span></p>
           </div>
         </section>`;
 
@@ -478,6 +495,8 @@
       root.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => Router.go(b.dataset.go)));
       root.querySelector('[data-action="reset"]').addEventListener('click', Profile.confirmReset);
       root.querySelector('[data-action="install"]')?.addEventListener('click', () => global.PWA.install());
+      root.querySelector('[data-action="password"]')?.addEventListener('click', Profile.changePassword);
+      root.querySelector('[data-action="delete-account"]')?.addEventListener('click', Profile.deleteAccount);
       // Sem academia: abre direto o código. Com academia: detalhes e "Sair da academia" na tela de plano.
       root.querySelector('[data-academy-row]')?.addEventListener('click', () => {
         if ((global.Plans.account().academia || {}).vinculada) Router.go('profile/plan');
@@ -569,6 +588,67 @@
       body.querySelector('[data-clear]')?.addEventListener('click', () => { sheet.close(); Profile.save({ birthDate: null }); });
     },
 
+    // Trocar senha: o servidor confere a atual, grava a nova e encerra as sessões dos outros aparelhos
+    changePassword() {
+      const body = U.h(`
+        <form class="form" novalidate>
+          <label class="form-label" for="pw-cur">Senha atual</label>
+          <div class="field-wrap">
+            <input class="field auth-pass" id="pw-cur" name="current" type="password" autocomplete="current-password" enterkeyhint="next">
+            <button type="button" class="auth-eye" data-eye aria-label="Mostrar senhas">${icon('eye', { size: 20, stroke: 1.8 })}</button>
+          </div>
+          <label class="form-label mt-5" for="pw-new">Nova senha</label>
+          <input class="field auth-pass" id="pw-new" name="next" type="password" autocomplete="new-password" enterkeyhint="next" placeholder="Mínimo de 6 caracteres">
+          <label class="form-label mt-5" for="pw-new2">Confirmar nova senha</label>
+          <input class="field auth-pass" id="pw-new2" name="nextConfirm" type="password" autocomplete="new-password" enterkeyhint="go" placeholder="Digite a nova senha de novo">
+          <p class="field-error" aria-live="polite"></p>
+        </form>`);
+      const footer = U.h('<button type="button" class="btn btn-primary btn-block">Salvar nova senha</button>');
+      const sheet = UI.openSheet({ title: 'Trocar senha', subtitle: 'Os outros aparelhos saem da conta.', body, footer, focus: '#pw-cur' });
+      passwordForm(body, footer, { busy: 'Salvando…', fields: { wrong_password: 'current', weak_password: 'next', password_same: 'next', password_mismatch: 'nextConfirm' } }, async (d) => {
+        const r = await global.Backend.changePassword(d.current, d.next, d.nextConfirm);
+        sheet.close('done');
+        U.haptic('success');
+        UI.toast(r.otherSessionsEnded ? 'Senha alterada. Os outros aparelhos saíram da conta.' : 'Senha alterada.', { duration: 4000 });
+      });
+    },
+
+    // Excluir a conta (LGPD): pede a senha; o servidor apaga a conta e os dados, e o aparelho esquece tudo
+    deleteAccount() {
+      const acc = global.Plans.account();
+      const items = ['sua conta e o seu login', 'treinos, histórico, cargas e recordes', 'peso, altura, idade e metas'];
+      if ((acc.academia || {}).vinculada) items.push(`seu vínculo com a ${acc.academia.nome}`);
+      if (global.Plans.isPremium()) items.push('seu Premium');
+      const body = U.h(`
+        <form class="form" novalidate>
+          <p class="t-callout">Isso apaga para sempre:</p>
+          <ul class="delete-list">
+            ${items.map((t, i) => `<li>${esc(t)}${i === items.length - 1 ? '.' : ';'}</li>`).join('')}
+          </ul>
+          <p class="t-footnote mt-3">Não dá para desfazer. As cópias de segurança são apagadas automaticamente em até 30 dias.</p>
+          <label class="form-label mt-6" for="del-pass">Digite sua senha para confirmar</label>
+          <div class="field-wrap">
+            <input class="field auth-pass" id="del-pass" name="password" type="password" autocomplete="current-password" enterkeyhint="go">
+            <button type="button" class="auth-eye" data-eye aria-label="Mostrar senha">${icon('eye', { size: 20, stroke: 1.8 })}</button>
+          </div>
+          <p class="field-error" aria-live="polite"></p>
+        </form>`);
+      const footer = U.h(`
+        <div class="grid gap-2">
+          <button type="button" class="btn btn-danger btn-block" data-confirm>Excluir minha conta</button>
+          <button type="button" class="btn btn-ghost is-muted btn-block" data-cancel>Cancelar</button>
+        </div>`);
+      const sheet = UI.openSheet({ title: 'Excluir minha conta', body, footer });
+      footer.querySelector('[data-cancel]').addEventListener('click', () => sheet.close('cancel'));
+      passwordForm(body, footer.querySelector('[data-confirm]'), { busy: 'Excluindo…', fields: { wrong_password: 'password' } }, async (d) => {
+        await global.Backend.deleteAccount(d.password);
+        Store.clearAll();
+        try { sessionStorage.setItem('forja.notice', 'Sua conta foi excluída.'); } catch (e) { /* aba privada */ }
+        history.replaceState(null, '', location.pathname);
+        location.reload();
+      });
+    },
+
     confirmReset() {
       UI.confirmSheet({
         title: 'Apagar todos os dados?',
@@ -587,6 +667,44 @@
       });
     }
   };
+
+  // Formulário de senha numa folha: Enter passa para o próximo campo, o olho mostra as senhas,
+  // e o erro do servidor fica no campo certo (fields: código do erro → nome do campo)
+  function passwordForm(form, button, { busy, fields }, run) {
+    const error = form.querySelector('.field-error');
+    const inputs = [...form.querySelectorAll('input')];
+    const eye = form.querySelector('[data-eye]');
+    eye.addEventListener('click', () => {
+      const show = inputs[0].type === 'password';
+      inputs.forEach((x) => { x.type = show ? 'text' : 'password'; });
+      eye.innerHTML = icon(show ? 'eyeOff' : 'eye', { size: 20, stroke: 1.8 });
+    });
+    inputs.forEach((input, i) => {
+      input.addEventListener('input', () => { error.textContent = ''; inputs.forEach((x) => x.classList.remove('is-invalid')); });
+      input.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || e.isComposing) return;
+        e.preventDefault();
+        if (inputs[i + 1]) inputs[i + 1].focus(); else button.click();
+      });
+    });
+    const label = button.textContent;
+    button.addEventListener('click', async () => {
+      const data = Object.fromEntries(new FormData(form).entries());
+      button.disabled = true;
+      button.textContent = busy;
+      try {
+        await run(data);
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = label;
+        error.textContent = err.message;
+        const input = fields[err.code] && form.querySelector(`[name="${fields[err.code]}"]`);
+        if (input) { input.classList.add('is-invalid'); input.focus({ preventScroll: true }); }
+        if (err.code === 'invalid_session') setTimeout(() => location.reload(), 1500);
+      }
+    });
+    form.addEventListener('submit', (e) => { e.preventDefault(); button.click(); });
+  }
 
   /* ==========================================================================
      Navegação
