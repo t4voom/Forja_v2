@@ -7,6 +7,7 @@
  *   3. Implantar › Nova implantação › App da Web (executar como: você; acesso: qualquer pessoa).
  *   4. Cole a URL /exec em js/config.js (sheetsUrl) e mude backend para 'sheets'.
  *   5. Propriedade do script APP_BASE_URL = endereço público do app (https://...): os links dos e-mails apontam para ela.
+ *   6. Menu FORJA Admin › Ativar backup diário: uma cópia da planilha por dia no seu Google Drive.
  *
  * Abas (as três primeiras já existiam; as colunas novas entram sempre no FIM, nada é apagado):
  *   usuarios:            id | email | nome | hash | salt | plano | criadoEm | planoAtualizadoEm
@@ -704,6 +705,9 @@ function onOpen() {
       .addItem('Testar envio de e-mail', 'menuTestarEmail')
       .addItem('Confirmar e-mail de aluno (suporte)', 'menuConfirmarEmailAluno')
       .addSeparator()
+      .addItem('Ativar backup diário', 'menuAtivarBackup')
+      .addItem('Fazer backup agora', 'menuBackupAgora')
+      .addSeparator()
       .addItem('Atualizar estrutura (setup)', 'setup')
       .addToUi();
   } catch (e) { /* script avulso: sem menu */ }
@@ -820,6 +824,20 @@ function menuTestarEmail() {
     var email = ask_('Testar envio de e-mail', 'Enviar um e-mail de teste para:');
     var r = adminTestarEmail(email);
     say_('E-mail enviado', 'Confira a caixa de entrada de ' + r.email + ' (e o spam).\nO botão abre: ' + r.link + '\nE-mails que ainda podem ser enviados hoje: ' + r.restantes);
+  });
+}
+
+function menuAtivarBackup() {
+  menu_(function () {
+    var r = ativarBackupDiario();
+    say_('Backup diário ativado', 'Todo dia, por volta das ' + BACKUP_HOUR + 'h, uma cópia da planilha vai para a pasta "' + r.pasta + '" do seu Google Drive (ficam as últimas ' + BACKUP_KEEP + ').\n\nO primeiro backup já foi feito: ' + r.nome + '\n' + r.url);
+  });
+}
+
+function menuBackupAgora() {
+  menu_(function () {
+    var r = backupPlanilha();
+    say_('Backup feito', r.nome + '\nPasta: ' + r.pasta + '\n' + r.url + (r.agendado ? '' : '\n\nO backup automático ainda não está ativo: use FORJA Admin › Ativar backup diário.'));
   });
 }
 
@@ -968,6 +986,86 @@ function adminConfirmarEmailAluno(email) {
   if (!u) fail_('invalid', 'Conta não encontrada: ' + email);
   if (up_(u.emailVerificado) !== 'SIM') updateAccount_(u, verifiedChanges_());
   return u.email;
+}
+
+/* ==========================================================================
+   Backup diário da planilha
+   A planilha é o banco de dados: uma aba apagada sem querer apagaria contas e treinos.
+   Todo dia uma cópia de todas as abas vai para a pasta BACKUP_FOLDER do Google Drive de quem
+   é dono do script, guardando as últimas BACKUP_KEEP (as mais antigas vão para a lixeira).
+   · A aba "sessoes" não entra: são chaves de acesso ativas; depois de restaurar, basta entrar de novo.
+   · Copia com a trava das requisições: o backup nunca pega uma gravação do app pela metade.
+   · Ative pelo menu FORJA Admin › Ativar backup diário. Se um backup falhar, o Google avisa por e-mail.
+   ========================================================================== */
+var BACKUP_FOLDER = 'FORJA — backups';
+var BACKUP_KEEP = 30;
+var BACKUP_HOUR = 3;
+
+function backupPlanilha() {
+  var ss = ss_();
+  var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+  var name = 'FORJA backup ' + stamp;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(60000);
+  var copy, abas = 0;
+  try {
+    copy = SpreadsheetApp.create(name);
+    var blank = copy.getSheets()[0];
+    blank.setName('_vazia_' + Date.now()); // a aba padrão da cópia não pode ter o nome de uma aba copiada
+    ss.getSheets().forEach(function (sh) {
+      if (sh.getName() === SHEETS.sessions.name) return;
+      sh.copyTo(copy).setName(sh.getName());
+      abas++;
+    });
+    copy.deleteSheet(blank);
+  } catch (e) {
+    if (copy) DriveApp.getFileById(copy.getId()).setTrashed(true); // backup pela metade não fica no Drive
+    throw e;
+  } finally {
+    lock.releaseLock();
+  }
+  var folder = backupFolder_();
+  DriveApp.getFileById(copy.getId()).moveTo(folder);
+  pruneBackups_(folder);
+  PropertiesService.getScriptProperties().setProperty('BACKUP_ULTIMO', new Date().toISOString());
+  return { nome: name, url: copy.getUrl(), pasta: folder.getName(), abas: abas, agendado: backupTriggers_().length > 0 };
+}
+
+// Um acionador diário só (rodar de novo não duplica). Já faz o primeiro backup.
+function ativarBackupDiario() {
+  if (!backupTriggers_().length) ScriptApp.newTrigger('backupPlanilha').timeBased().everyDays(1).atHour(BACKUP_HOUR).create();
+  return backupPlanilha();
+}
+
+function desativarBackupDiario() {
+  backupTriggers_().forEach(function (t) { ScriptApp.deleteTrigger(t); });
+}
+
+function backupTriggers_() {
+  return ScriptApp.getProjectTriggers().filter(function (t) { return t.getHandlerFunction() === 'backupPlanilha'; });
+}
+
+// A pasta é lembrada pelo id (BACKUP_FOLDER_ID): renomear ou mover a pasta não cria outra
+function backupFolder_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('BACKUP_FOLDER_ID');
+  if (id) {
+    try { var f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) { /* pasta apagada: cria outra */ }
+  }
+  var folder = DriveApp.createFolder(BACKUP_FOLDER);
+  props.setProperty('BACKUP_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+function pruneBackups_(folder) {
+  var files = [];
+  var it = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
+  while (it.hasNext()) {
+    var f = it.next();
+    if (/^FORJA backup /.test(f.getName())) files.push(f);
+  }
+  files.sort(function (a, b) { return b.getDateCreated().getTime() - a.getDateCreated().getTime(); });
+  files.slice(BACKUP_KEEP).forEach(function (f) { f.setTrashed(true); });
 }
 
 // Apenas para testar o fluxo 4 do LEIA-ME: cria a "Academia Teste" (50 alunos, código FORJA-GYM-TESTE)

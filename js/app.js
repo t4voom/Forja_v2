@@ -430,6 +430,15 @@
             <div class="section" style="--i:4">
               <p class="t-eyebrow group-label">Dados</p>
               <div class="group">
+                ${global.PWA && global.PWA.canOffer() ? `
+                <button class="row" data-action="install">
+                  <span class="row-icon">${icon('download', { size: 20 })}</span>
+                  <span class="row-main">
+                    <span class="row-title block">Instalar o FORJA</span>
+                    <span class="row-sub block">Ícone na tela inicial, tela cheia e abre sem internet.</span>
+                  </span>
+                  ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
+                </button>` : ''}
                 <button class="row is-danger" data-action="reset">
                   <span class="row-icon">${icon('trash', { size: 20 })}</span>
                   <span class="row-main row-title">Apagar todos os dados</span>
@@ -468,6 +477,7 @@
       root.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => Profile.edit(b.dataset.edit)));
       root.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => Router.go(b.dataset.go)));
       root.querySelector('[data-action="reset"]').addEventListener('click', Profile.confirmReset);
+      root.querySelector('[data-action="install"]')?.addEventListener('click', () => global.PWA.install());
       // Sem academia: abre direto o código. Com academia: detalhes e "Sair da academia" na tela de plano.
       root.querySelector('[data-academy-row]')?.addEventListener('click', () => {
         if ((global.Plans.account().academia || {}).vinculada) Router.go('profile/plan');

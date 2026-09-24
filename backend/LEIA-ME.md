@@ -14,6 +14,8 @@ FORJA Trainer (web)      ┘                │ autentica, autoriza,    │     
 - **O localStorage nunca é a fonte da verdade** para Premium, academia, permissões, assinatura ou limite de alunos: a cada abertura o app pergunta ao servidor (`me`) e usa a resposta.
 - Ao abrir o app e ao voltar para ele (no máximo 1× por minuto), o app baixa os treinos (`pull`), e o que o treinador salvou aparece.
 - Senhas nunca são gravadas: só o *hash* (HMAC-SHA256 iterado, com salt por conta e uma "pimenta" guardada nas propriedades do script).
+- A planilha ganha um **backup diário** automático no seu Google Drive (ative uma vez pelo menu). Veja [Backup diário](#backup-diário).
+- O app abre **sem internet** e pode ser **instalado** na tela inicial. Veja [App instalável e sem internet](#app-instalável-e-sem-internet).
 - Conta de aluno nova precisa **confirmar o e-mail** pelo link antes de usar o app; "Esqueci minha senha" manda um link para criar uma senha nova. Veja [Confirmação de e-mail e nova senha](#confirmação-de-e-mail-e-nova-senha).
 
 ## Instalação / atualização
@@ -30,6 +32,7 @@ FORJA Trainer (web)      ┘                │ autentica, autoriza,    │     
 5. **Publicar.** *Implantar › Gerenciar implantações › Editar (lápis) › Versão: Nova versão › Implantar*. A URL `/exec` continua a mesma. (Primeira vez: *Nova implantação › App da Web*, executar como **Eu**, acesso **Qualquer pessoa**.)
 6. **App e Dashboard.** Os dois usam `js/config.js` (`backend: 'sheets'`, `sheetsUrl: '.../exec'`). O Dashboard fica em `/trainer/` no mesmo site do app. Publique também os arquivos novos do app (`index.html` já aponta para `?v=20260924a`).
 7. **Recarregue a planilha (F5).** Aparece o menu **FORJA Admin**. Use *FORJA Admin › Testar envio de e-mail* para conferir se o e-mail chega e se o botão abre o app.
+8. **Backup.** *FORJA Admin › Ativar backup diário* (uma vez só). O Google pede mais duas autorizações: acesso ao **Google Drive** (para criar a pasta de backups) e **executar quando você não estiver presente** (o acionador diário).
 
 ## Menu "FORJA Admin" (só quem edita a planilha)
 
@@ -45,8 +48,36 @@ FORJA Trainer (web)      ┘                │ autentica, autoriza,    │     
 | Recalcular Premium de todos | Recalcula o espelho `tipoConta`/`origemPremium` de todas as contas. |
 | Testar envio de e-mail | Confere `APP_BASE_URL`, o provedor e a cota, e manda um e-mail de teste com o mesmo visual dos e-mails da conta. |
 | Confirmar e-mail de aluno (suporte) | Marca o e-mail do aluno como confirmado sem o link (ex.: o e-mail não chega e ele comprovou a identidade por outro canal). |
+| Ativar backup diário | Cria o acionador diário (por volta das 3h) e já faz o primeiro backup. Rodar de novo não duplica. |
+| Fazer backup agora | Uma cópia na hora (antes de mexer na planilha à mão, por exemplo). |
 
 Também dá para chamar pelo editor: `adminCriarAcademia`, `adminCriarTreinador`, `adminCriarCodigoPremium`, `adminRegistrarAssinatura`, `adminEncerrarVinculo`… e `testeCriarAcademiaTeste()` (cria a "Academia Teste", 50 alunos, código `FORJA-GYM-TESTE`).
+
+## Backup diário
+
+A planilha é o banco de dados do FORJA: uma aba ou coluna apagada sem querer apagaria contas e treinos. Com o backup ativado, todo dia (por volta das 3h, no fuso do projeto) o script:
+
+1. cria uma planilha **"FORJA backup AAAA-MM-DD HH:MM"** com uma cópia de **todas as abas**, menos `sessoes` (são as chaves de acesso ativas: não precisam de backup e não devem circular);
+2. guarda a cópia na pasta **"FORJA — backups"** do Google Drive de quem é dono do script;
+3. mantém as **30 cópias mais novas**; as mais antigas vão para a lixeira do Drive (e ainda podem ser recuperadas por 30 dias).
+
+- A cópia é feita com a mesma trava das requisições do app, então nunca pega uma gravação pela metade. Se algum aluno usar o app exatamente nesse segundo, a requisição dele espera alguns segundos.
+- Se um backup falhar, o Google manda um e-mail para você com o erro (acionadores com falha avisam o dono).
+- Pode renomear ou mover a pasta: o script a encontra pelo id (propriedade `BACKUP_FOLDER_ID`). Se a pasta for apagada, ele cria outra.
+- **Não compartilhe a pasta de backups.** Ela tem os mesmos dados da planilha (e-mails, peso, altura, e os *hashes* das senhas).
+- Para desligar: *Extensões › Apps Script › Acionadores* (relógio, à esquerda) e apague o acionador `backupPlanilha`, ou rode a função `desativarBackupDiario` pelo editor.
+
+**Para restaurar:** abra o backup do dia certo, clique com o botão direito na aba que quer recuperar › *Copiar para › Planilha existente* › escolha a planilha do FORJA. Na planilha do FORJA, apague a aba estragada e renomeie a cópia para o nome original (ex.: `usuarios`). Como `sessoes` não vem no backup, quem já estava logado continua logado; se você restaurar tudo de uma vez, no pior caso os alunos só precisam entrar de novo.
+
+## App instalável e sem internet
+
+Arquivos: `manifest.webmanifest`, `sw.js`, `js/pwa.js` e os ícones em `assets/icons/`.
+
+- **Sem internet:** depois da primeira abertura, o app fica guardado no aparelho e abre mesmo sem sinal (ou com sinal ruim: se a internet não responder em 3,5 s, abre a cópia guardada). Os treinos já ficavam no aparelho; o que mudou é que agora o próprio app abre. O que for registrado sem internet vai para a planilha quando a conexão voltar.
+- **Instalar:** no Android (Chrome), *Perfil › Dados › Instalar o FORJA* abre o convite de instalação; também dá pelo menu ⋮ do Chrome. No iPhone, a mesma opção mostra o caminho: *Safari › Compartilhar › Adicionar à Tela de Início*. Instalado, o app abre em tela cheia com o ícone do FORJA, e a opção some do Perfil.
+  - No iPhone, o app instalado tem um armazenamento separado do Safari: na primeira vez, é preciso **entrar de novo** (os dados vêm da conta). Os links dos e-mails abrem no Safari; a confirmação vale para a conta e o app instalado percebe sozinho.
+- **Publicar uma versão nova continua igual:** troque o `?v=` do `index.html`. Com internet, o app abre a versão nova na hora e o aparelho troca os arquivos antigos pelos novos. Não precisa mexer no `sw.js`.
+- O service worker só cuida dos arquivos do app. As chamadas ao Apps Script nunca passam pelo cache (os dados sempre vêm do servidor), e um FORJA Trainer publicado em `/trainer/` no mesmo site não é afetado.
 
 ## Confirmação de e-mail e nova senha
 
