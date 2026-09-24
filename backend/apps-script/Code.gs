@@ -522,6 +522,7 @@ var ACTIONS = {
       treinos: (Array.isArray(d.workouts) ? d.workouts : []).slice().sort(byOrder_),
       exerciciosPersonalizados: (Array.isArray(d.exercises) ? d.exercises : []).map(function (e) { return { id: e.id, name: e.name, muscle: e.muscle, equipment: e.equipment }; }),
       sessoes: sessions,
+      analise: studentAnalysis_(d.sessions),
       alteracoes: academyLog_(ctx.academy.id, 30, u.id)
     };
   },
@@ -1346,6 +1347,181 @@ function studentOf_(ctx, userId) {
   if (!u || String(u.academiaId) !== String(ctx.academy.id) || up_(u.statusVinculoAcademia) !== 'ATIVO') fail_('student_not_found');
   return u;
 }
+
+/* ==========================================================================
+   Painel do aluno no FORJA Trainer
+   Tudo calculado aqui, a partir do histórico completo de treinos que o app sincroniza, com as mesmas
+   regras do app (js/statistics.js): série de trabalho = concluída e que não é aquecimento;
+   volume = carga × repetições. A progressão usa a carga máxima de cada treino (série mais pesada).
+   Anotações e humor do aluno não saem daqui: o treinador vê cargas, séries, duração e o esforço (RPE).
+   ========================================================================== */
+var DAY_MS = 86400000;
+
+function studentAnalysis_(sessions) {
+  var nowMs = Date.now();
+  var list = (Array.isArray(sessions) ? sessions : []).filter(function (s) { return s && toDate_(s.startedAt); })
+    .sort(function (a, b) { return cmpAsc_(a.startedAt, b.startedAt); });
+  var info = list.map(function (s) {
+    var sets = 0, volume = 0;
+    (s.exercises || []).forEach(function (ex) {
+      (ex.sets || []).forEach(function (st) {
+        if (!workingSet_(st)) return;
+        sets++;
+        volume += setVolume_(st);
+      });
+    });
+    return { s: s, t: toDate_(s.startedAt).getTime(), day: day_(s.startedAt), sets: sets, volume: volume };
+  });
+  var inDays = function (from, to) { return info.filter(function (x) { return x.t > nowMs - from * DAY_MS && x.t <= nowMs - to * DAY_MS; }); };
+  var sum = function (arr, k) { return arr.reduce(function (n, x) { return n + (x[k] || 0); }, 0); };
+  var last30 = inDays(30, 0), prev30 = inDays(60, 30);
+  var withTime = last30.filter(function (x) { return Number(x.s.durationSec) > 0; });
+  var rated = last30.filter(function (x) { return int_(x.s.rpe, 1, 10); });
+
+  // 12 semanas (segunda a domingo), da mais antiga para a atual
+  var thisWeek = weekStart_(day_(new Date()));
+  var weeks = [];
+  for (var w = 11; w >= 0; w--) weeks.push({ inicio: shiftDay_(thisWeek, -7 * w), treinos: 0, series: 0, volume: 0 });
+  var weekIndex = {};
+  weeks.forEach(function (x, i) { weekIndex[x.inicio] = i; });
+  var days = {};
+  var firstDay = shiftDay_(thisWeek, -7 * 11);
+  info.forEach(function (x) {
+    var i = weekIndex[weekStart_(x.day)];
+    if (i !== undefined) { weeks[i].treinos++; weeks[i].series += x.sets; weeks[i].volume += x.volume; }
+    if (x.day >= firstDay) {
+      var d = days[x.day] = days[x.day] || { dia: x.day, treinos: 0, series: 0 };
+      d.treinos++;
+      d.series += x.sets;
+    }
+  });
+  weeks.forEach(function (x) { x.volume = Math.round(x.volume); });
+
+  // Semanas seguidas com pelo menos um treino (a atual conta se já tiver treino)
+  var trained = {};
+  info.forEach(function (x) { trained[weekStart_(x.day)] = true; });
+  var streak = 0, cursor = trained[thisWeek] ? thisWeek : shiftDay_(thisWeek, -7);
+  while (trained[cursor]) { streak++; cursor = shiftDay_(cursor, -7); }
+
+  var ex = exerciseProgress_(info, nowMs);
+  var lastSession = info.length ? info[info.length - 1].s.startedAt : '';
+  return {
+    hoje: day_(new Date()),
+    resumo: {
+      treinos30: last30.length, treinos30Anterior: prev30.length,
+      volume30: Math.round(sum(last30, 'volume')), volume30Anterior: Math.round(sum(prev30, 'volume')),
+      series30: sum(last30, 'sets'),
+      frequencia4: round_(inDays(28, 0).length / 4, 1),
+      duracaoMedia30: withTime.length ? Math.round(withTime.reduce(function (n, x) { return n + Number(x.s.durationSec); }, 0) / withTime.length) : null,
+      rpeMedio30: rated.length ? round_(rated.reduce(function (n, x) { return n + Number(x.s.rpe); }, 0) / rated.length, 1) : null,
+      rpeAvaliados30: rated.length,
+      ultimoTreino: iso_(lastSession), totalTreinos: info.length, primeiroTreino: info.length ? iso_(info[0].s.startedAt) : '',
+      semanasSeguidas: streak
+    },
+    semanas: weeks,
+    dias: Object.keys(days).sort().map(function (k) { return days[k]; }),
+    exercicios: ex.top,
+    estagnados: ex.stalled,
+    recordes: ex.records,
+    seriesExercicio28: ex.sets28,
+    treinosUso: workoutUsage_(info, nowMs),
+    sessoes: info.slice(-30).reverse().map(function (x) {
+      return {
+        id: x.s.id, workoutId: x.s.workoutId || '', treino: str_(x.s.name, 60) || 'Treino', data: iso_(x.s.startedAt),
+        duracaoSeg: Number(x.s.durationSec) > 0 ? Math.round(Number(x.s.durationSec)) : null,
+        rpe: int_(x.s.rpe, 1, 10), series: x.sets, volume: Math.round(x.volume),
+        exercicios: (x.s.exercises || []).map(function (e) {
+          return {
+            exerciseId: String(e.exerciseId || ''), nome: str_(e.name, 60), musculo: str_(e.muscle, 30),
+            series: (e.sets || []).filter(function (st) { return st && st.done !== false; }).map(function (st) {
+              return { kg: num_(st.weightKg), reps: int_(st.reps, 0, 1000), aquecimento: st.type === 'warmup' };
+            })
+          };
+        })
+      };
+    })
+  };
+}
+
+// Por exercício: carga máxima de cada treino (a série mais pesada; sem carga, as repetições),
+// recordes dos últimos 30 dias e estagnação (3+ treinos e 3+ semanas sem recorde)
+function exerciseProgress_(info, nowMs) {
+  var by = {}, sets28 = {};
+  info.forEach(function (x) {
+    (x.s.exercises || []).forEach(function (e) {
+      var id = String(e.exerciseId || '');
+      var sets = (e.sets || []).filter(workingSet_);
+      if (!id || !sets.length) return;
+      var ex = by[id] = by[id] || { exerciseId: id, nome: str_(e.name, 60), musculo: str_(e.muscle, 30), treinos: [] };
+      if (x.t > nowMs - 28 * DAY_MS) {
+        var k = sets28[id] = sets28[id] || { exerciseId: id, musculo: ex.musculo, series: 0 };
+        k.series += sets.length;
+      }
+      var kg = 0, repsAtKg = 0, maxReps = 0;
+      sets.forEach(function (st) {
+        var w = num_(st.weightKg) || 0, r = int_(st.reps, 0, 1000) || 0;
+        if (r < 1) return;
+        if (w > kg || (w === kg && r > repsAtKg)) { kg = w; repsAtKg = r; }
+        if (r > maxReps) maxReps = r;
+      });
+      if (maxReps) ex.treinos.push({ data: iso_(x.s.startedAt), t: x.t, kg: kg, reps: kg > 0 ? repsAtKg : maxReps });
+    });
+  });
+  var records = [];
+  var all = Object.keys(by).map(function (k) {
+    var e = by[k];
+    var porCarga = e.treinos.some(function (p) { return p.kg > 0; });
+    var pts = e.treinos.filter(function (p) { return !porCarga || p.kg > 0; });
+    var best = 0, lastRecord = null, since = 0;
+    pts.forEach(function (p) {
+      var v = porCarga ? p.kg : p.reps;
+      if (v > best) {
+        if (best > 0 && p.t > nowMs - 30 * DAY_MS) records.push({ exerciseId: e.exerciseId, nome: e.nome, data: p.data, antes: best, agora: v, reps: p.reps, porCarga: porCarga });
+        best = v; lastRecord = p; since = 0;
+      } else since++;
+    });
+    var weeksSince = lastRecord ? Math.floor((nowMs - lastRecord.t) / (7 * DAY_MS)) : 0;
+    return {
+      exerciseId: e.exerciseId, nome: e.nome, musculo: e.musculo, medida: porCarga ? 'carga' : 'reps',
+      treinos90: pts.filter(function (p) { return p.t > nowMs - 90 * DAY_MS; }).length,
+      recorde: best, dataRecorde: lastRecord ? lastRecord.data : '',
+      estagnado: since >= 3 && weeksSince >= 3, treinosSemRecorde: since, semanasSemRecorde: weeksSince,
+      pontos: pts.slice(-12).map(function (p) { return { data: p.data, valor: porCarga ? p.kg : p.reps, kg: p.kg, reps: p.reps }; }),
+      ultimo: pts.length ? pts[pts.length - 1].t : 0
+    };
+  });
+  // Estagnados entre todos os exercícios que o aluno ainda faz (feitos nos últimos 30 dias), não só os 6 do painel
+  var stalled = all.filter(function (e) { return e.estagnado && e.ultimo > nowMs - 30 * DAY_MS; })
+    .sort(function (a, b) { return b.semanasSemRecorde - a.semanasSemRecorde; })
+    .slice(0, 8)
+    .map(function (e) { return { exerciseId: e.exerciseId, nome: e.nome, medida: e.medida, recorde: e.recorde, treinosSemRecorde: e.treinosSemRecorde, semanasSemRecorde: e.semanasSemRecorde }; });
+  var top = all.filter(function (e) { return e.treinos90 > 0; })
+    .sort(function (a, b) { return b.treinos90 - a.treinos90 || b.ultimo - a.ultimo; })
+    .slice(0, 6);
+  top.forEach(function (e) { delete e.ultimo; });
+  records.sort(function (a, b) { return cmpDesc_(a.data, b.data); });
+  return { top: top, stalled: stalled, records: records.slice(0, 10), sets28: Object.keys(sets28).map(function (k) { return sets28[k]; }) };
+}
+
+// Treinos montados: quantas vezes foram feitos nos últimos 30 dias e quando foi a última vez
+function workoutUsage_(info, nowMs) {
+  var out = {};
+  info.forEach(function (x) {
+    var id = x.s.workoutId;
+    if (!id) return;
+    var u = out[id] = out[id] || { vezes30: 0, total: 0, ultimo: '' };
+    u.total++;
+    if (x.t > nowMs - 30 * DAY_MS) u.vezes30++;
+    u.ultimo = iso_(x.s.startedAt);
+  });
+  return out;
+}
+
+function workingSet_(st) { return !!st && st.done !== false && st.type !== 'warmup'; }
+function setVolume_(st) { var w = num_(st.weightKg), r = num_(st.reps); return w > 0 && r > 0 ? w * r : 0; }
+// Segunda-feira da semana de um dia 'AAAA-MM-DD' (e somar dias a uma data nesse formato)
+function weekStart_(key) { var d = new Date(key + 'T12:00:00Z'); return shiftDay_(key, -((d.getUTCDay() + 6) % 7)); }
+function shiftDay_(key, n) { return new Date(new Date(key + 'T12:00:00Z').getTime() + n * DAY_MS).toISOString().slice(0, 10); }
 
 function publicTrainer_(t) {
   var academies = [];

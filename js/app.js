@@ -336,7 +336,7 @@
                 ${row('birthDate', 'Aniversário', p.birthDate ? fmtBirthday(p.birthDate) : '', 'gift')}
               </div>
               ${bmiOf(p) != null ? `<p class="t-footnote group-note">IMC ${U.fmtNum(bmiOf(p), 1)} · calculado com seu peso e altura atuais.</p>` : ''}
-              ${(global.Plans.account().academia || {}).vinculada ? `<p class="t-footnote group-note">Seu treinador na ${esc(global.Plans.account().academia.nome)} vê seu peso, altura e idade.</p>` : ''}
+              ${(global.Plans.account().academia || {}).vinculada ? `<p class="t-footnote group-note">Seu treinador na ${esc(global.Plans.account().academia.nome)} vê seu peso, altura, idade e os treinos que você faz (séries, cargas e esforço), mas não as suas anotações.</p>` : ''}
             </div>
 
             <div class="section" style="--i:2">

@@ -202,6 +202,13 @@ Para integrar Mercado Pago, Stripe, Apple ou Google Play depois:
 - Quando o aluno sai da academia, os treinos montados pelo treinador passam a ser dele (`releasedFrom`).
 - Campos extras por exercício: `loadKg` (carga), `restSec` (descanso) e `notes` (observação). O app mostra os três, e usa a carga como ponto de partida no modo treino.
 
+### Painel do aluno (Trainer › Alunos › aluno › Visão geral)
+
+- `trainerStudent` devolve `analise`, calculada na hora a partir de `sessions` (nada novo é gravado na planilha): indicadores de 30 dias, as 12 últimas semanas, os dias de treino, a progressão de carga dos 6 exercícios mais feitos, recordes, exercícios sem evolução, séries por músculo, uso dos treinos montados e os 30 últimos treinos com as séries.
+- Contam só as séries **feitas** e que **não são aquecimento**. Progressão = a carga mais pesada de cada treino (sem carga: repetições). "Sem evolução" = 3 treinos e 3 semanas ou mais sem bater o recorde.
+- Anotações e humor que o aluno registra ao terminar o treino **não** vão para o treinador.
+- O Trainer novo com o Code.gs antigo mostra um aviso na Visão geral ("Painel indisponível") e o resto funciona. Publique o Code.gs novo (Implantar › Gerenciar implantações › editar › Nova versão).
+
 ## Formato dos dados
 
 Abas existentes (colunas novas entram no fim):
