@@ -11,7 +11,7 @@
 const CACHE = 'forja-app-v1';
 const SCOPE = new URL('./', self.location).href;
 const SCOPE_PATH = new URL(SCOPE).pathname;
-const EXTRA = ['manifest.webmanifest', 'assets/icons/icon.svg', 'assets/icons/icon-192.png', 'assets/icons/icon-512.png', 'assets/icons/icon-maskable-512.png', 'assets/icons/apple-touch-icon.png']
+const EXTRA = ['manifest.webmanifest', 'assets/icons/icon.svg', 'assets/icons/icon-192.png', 'assets/icons/icon-512.png', 'assets/icons/icon-maskable-512.png', 'assets/icons/apple-touch-icon.png', 'assets/icons/badge-96.png']
   .map((p) => new URL(p, SCOPE).href);
 const NAV_TIMEOUT = 3500;
 
@@ -93,19 +93,22 @@ async function fromDevice(req) {
   return res;
 }
 
-// Tocar na notificação: volta para o FORJA aberto ou abre uma janela nova
+// Tocar na notificação: volta para o FORJA aberto ou abre uma janela nova.
+// matchAll traz todas as janelas do site (Trainer, termos, privacidade...): só serve a página do app.
+const isAppPage = (href) => {
+  const u = new URL(href);
+  return u.origin === self.location.origin && u.pathname.startsWith(SCOPE_PATH) && /^(index\.html)?$/.test(u.pathname.slice(SCOPE_PATH.length));
+};
+
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || './';
+  const url = new URL((e.notification.data && e.notification.data.url) || './', SCOPE).href;
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-      for (const c of list) {
-        if ('focus' in c) {
-          if ('navigate' in c) c.navigate(url).catch(() => {});
-          return c.focus();
-        }
-      }
-      return self.clients.openWindow(url);
+      const app = list.find((c) => 'focus' in c && isAppPage(c.url));
+      if (!app) return self.clients.openWindow(url);
+      if ('navigate' in app) app.navigate(url).catch(() => {});
+      return app.focus();
     })
   );
 });

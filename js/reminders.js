@@ -1,7 +1,8 @@
 /* FORJA — lembretes de treino e de peso corporal
    Sem servidor, um app web não consegue acordar o celular sozinho. Por isso são três camadas:
    1. Na tela inicial: "Hoje é dia de treino" e o cartão "Dia de se pesar" (sempre funciona).
-   2. Notificações do navegador: chegam enquanto o FORJA está aberto ou instalado (service worker).
+   2. Notificações do navegador: chegam enquanto o FORJA está aberto (mesmo em outra aba). Sem push,
+      nada acorda o app fechado — e o celular congela o app pouco depois de ele sair da tela.
    3. Calendário: um arquivo .ics com eventos semanais e alarme — o celular avisa mesmo com o app fechado.
    Estado: Store 'reminders' = { workout: { on, days: [0–6], time }, weight: { on, day, time }, notify, last: {} } */
 (function (global) {
@@ -94,27 +95,37 @@
      ========================================================================== */
   const supported = () => 'Notification' in global;
   const permission = () => (supported() ? Notification.permission : 'unsupported');
-  let swReg = null;
 
-  function registerWorker() {
-    if (!('serviceWorker' in navigator) || !/^https?:$/.test(location.protocol)) return;
-    navigator.serviceWorker.register('sw.js').then((reg) => { swReg = reg; }).catch(() => { /* sem service worker: usa Notification direto */ });
+  // O service worker (registrado pelo pwa.js) só mostra notificação depois de ativo: na primeira
+  // abertura ele ainda está instalando. Espera por ele, com limite, para não travar sem ele.
+  function worker() {
+    if (!('serviceWorker' in navigator) || !/^https?:$/.test(location.protocol)) return Promise.resolve(null);
+    return Promise.race([navigator.serviceWorker.ready, new Promise((resolve) => setTimeout(resolve, 5000, null))]).catch(() => null);
   }
 
-  function notify(title, body, hash, tag) {
-    if (permission() !== 'granted') return;
+  // Resolve true se a notificação foi mostrada.
+  // · renotify: sem ele, a mesma tag (a de ontem ainda na bandeja, um segundo teste) só troca o texto, sem som nem aviso.
+  // · Ícones em PNG, que todo sistema mostra. O badge precisa ser monocromático: o Android usa só a
+  //   transparência dele, e o ícone colorido (quadrado escuro) virava um quadrado branco na barra.
+  async function notify(title, body, hash, tag) {
+    if (permission() !== 'granted') return false;
     const url = `${location.pathname}${hash}`;
-    const opts = { body, icon: 'assets/icons/icon.svg', badge: 'assets/icons/icon.svg', tag, data: { url } };
-    if (swReg && swReg.showNotification) { swReg.showNotification(title, opts).catch(() => {}); return; }
+    const opts = { body, icon: 'assets/icons/icon-192.png', badge: 'assets/icons/badge-96.png', tag, renotify: true, data: { url } };
+    const reg = await worker();
+    if (reg) {
+      try { await reg.showNotification(title, opts); return true; } catch (e) { /* tenta direto */ }
+    }
     try {
       const n = new Notification(title, opts);
       n.onclick = () => { global.focus(); location.hash = hash; n.close(); };
-    } catch (e) { /* Android exige service worker; sem ele, fica só o aviso na tela inicial */ }
+      return true;
+    } catch (e) { return false; } // Android exige service worker; sem ele, fica só o aviso na tela inicial
   }
 
   const STALE_MS = 4 * 3600 * 1000; // passou há mais de 4h: não avisa mais (o aviso da Home cobre)
 
   function check() {
+    if (!global.Plans.isPremium()) return; // lembretes são do Premium: param se o plano acabar com o app aberto
     const r = get();
     const now = new Date();
     const hidden = document.visibilityState !== 'visible';
@@ -145,7 +156,6 @@
   function start() {
     if (started) return;
     started = true;
-    registerWorker();
     check();
     setInterval(check, 30000);
     document.addEventListener('visibilitychange', check);
@@ -249,7 +259,7 @@
     const p = permission();
     if (p === 'unsupported') return 'Este navegador não oferece notificações.';
     if (p === 'denied') return 'Bloqueadas neste navegador. Libere nas configurações do site.';
-    return 'Chegam no horário enquanto o FORJA estiver aberto ou instalado na tela inicial.';
+    return 'Chegam no horário enquanto o FORJA estiver aberto, mesmo em outra aba. Com ele fechado, quem avisa é o calendário.';
   }
 
   function render(root) {
@@ -372,10 +382,14 @@
       Router().refresh();
       UI.toast('Dias ajustados ao programa');
     });
-    root.querySelector('[data-test]')?.addEventListener('click', () => {
+    root.querySelector('[data-test]')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
       const w = global.Workouts.next();
-      notify('Hora do treino', w ? `${w.name} está pronto. Bora?` : 'Hoje é dia de treino.', '#/home', 'forja-teste');
-      UI.toast('Notificação enviada');
+      const ok = await notify('Hora do treino', w ? `${w.name} está pronto. Bora?` : 'Hoje é dia de treino.', '#/home', 'forja-teste');
+      btn.disabled = false;
+      if (ok) UI.toast('Notificação enviada');
+      else UI.toast('Não foi possível mostrar a notificação neste navegador.', { iconName: 'info', duration: 4000 });
     });
     root.querySelector('[data-ics]')?.addEventListener('click', downloadICS);
   }
