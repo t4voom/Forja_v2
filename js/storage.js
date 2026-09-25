@@ -23,6 +23,7 @@
     exercises: [],          // exercícios personalizados
     favorites: [],          // ids de exercícios favoritos
     sessions: [],           // treinos concluídos
+    cardio: [],             // atividades aeróbicas (ver cardio.js)
     active: null,           // treino em andamento (autosave)
     bodyweight: [],         // { id, date, kg }
     goals: [],              // metas

@@ -93,7 +93,8 @@ Arquivos: `manifest.webmanifest`, `sw.js`, `js/pwa.js` e os ícones em `assets/i
 | Opção | O que faz |
 |---|---|
 | Conta › **Trocar senha** | Pede a senha atual, grava a nova (mesmo hash de sempre), invalida um link de "Esqueci minha senha" ainda aberto e **encerra as sessões dos outros aparelhos** (este continua). 5 senhas atuais erradas = o mesmo bloqueio de 15 min do login. |
-| Dados › **Apagar todos os dados** | Apaga treinos, histórico, recordes, metas, **histórico de peso** e peso/altura/nascimento. A conta, o plano e a academia continuam. (Antes, o histórico de peso e o peso/altura ficavam na planilha; agora saem também.) |
+| Dados › **Baixar meus dados** | Gera no próprio aparelho (nada passa pelo servidor) um **arquivo completo** em JSON (conta + todas as chaves do app) e uma **planilha** CSV com uma linha por série de musculação e uma por cardio (`;` e vírgula decimal, para o Excel em português). No celular abre a folha de compartilhar; no computador, baixa. Atende ao acesso e à portabilidade da LGPD (art. 18). |
+| Dados › **Apagar todos os dados** | Apaga treinos, cardio, histórico, recordes, metas, **histórico de peso** e peso/altura/nascimento. A conta, o plano e a academia continuam. (Antes, o histórico de peso e o peso/altura ficavam na planilha; agora saem também.) |
 | Dados › **Excluir minha conta** | Pede a senha. Apaga a conta (a linha de `usuarios`), a aba `dados`, o histórico de peso, o histórico de treinos montados pelo treinador e **todas as sessões**; encerra o vínculo com a academia (`motivoSaida = CONTA_EXCLUIDA`, a vaga é liberada). O e-mail fica livre para uma conta nova. |
 | Rodapé | Links para os Termos de Uso e a Política de Privacidade. |
 
@@ -202,6 +203,14 @@ Para integrar Mercado Pago, Stripe, Apple ou Google Play depois:
 - Quando o aluno sai da academia, os treinos montados pelo treinador passam a ser dele (`releasedFrom`).
 - Campos extras por exercício: `loadKg` (carga), `restSec` (descanso) e `notes` (observação). O app mostra os três, e usa a carga como ponto de partida no modo treino.
 
+### Painel do aluno (Trainer › Alunos › aluno › Visão geral)
+
+- `trainerStudent` devolve `analise`, calculada na hora a partir de `sessions` (nada novo é gravado na planilha): indicadores de 30 dias, as 12 últimas semanas, os dias de treino, a progressão de carga dos 6 exercícios mais feitos, recordes, exercícios sem evolução, séries por músculo, uso dos treinos montados e os 30 últimos treinos com as séries.
+- Contam só as séries **feitas** e que **não são aquecimento**. Progressão = a carga mais pesada de cada treino (sem carga: repetições). "Sem evolução" = 3 treinos e 3 semanas ou mais sem bater o recorde.
+- Anotações e humor que o aluno registra ao terminar o treino **não** vão para o treinador.
+- **Cardio**: minutos por semana (opção "Cardio" no gráfico), dias com cardio no calendário, um cartão com os últimos 30 dias e os registros no Histórico. Vão para o treinador tipo, data, duração, distância e esforço; calorias e observações ficam só com o aluno. Um aluno que só fez cardio não aparece como "Sem treinar".
+- O Trainer novo com o Code.gs antigo mostra um aviso na Visão geral ("Painel indisponível") e o resto funciona. Publique o Code.gs novo (Implantar › Gerenciar implantações › editar › Nova versão).
+
 ## Formato dos dados
 
 Abas existentes (colunas novas entram no fim):
@@ -211,6 +220,9 @@ Abas existentes (colunas novas entram no fim):
 | `usuarios` | id, email, nome, hash, salt, plano, criadoEm, planoAtualizadoEm, **tipoConta, origemPremium, statusPremium, premiumManual, academiaId, academiaNome, statusVinculoAcademia, dataEntradaAcademia, dataSaidaAcademia, dataNascimento, idade, pesoAtual, altura, ultimoAcesso, statusUsuario, emailVerificado** (`SIM`/`NAO`/`LEGADO`), **dataVerificacaoEmail, tokenVerificacaoEmailHash, tokenVerificacaoEmailExpira, tokenResetSenhaHash, tokenResetSenhaExpira, termosAceitosEm, termosVersao** |
 | `sessoes` | token, userId, criadoEm, expiraEm, **tipo** (`aluno` 60 dias · `treinador` 12 h) |
 | `dados` | userId, chave, parte, json, atualizadoEm |
+
+Chaves da aba `dados` (JSON do app, em partes): `meta`, `profile`, `settings`, `workouts`, `exercises`, `favorites`, `sessions`, **`cardio`**, `active`, `bodyweight`, `goals`, `program`, `reminders`.
+`cardio` é uma lista de `{ id, activity, name, startedAt, durationSec, distanceKm, kcal, rpe, notes, createdAt, updatedAt }` (distância sempre em km; `kcal` só quando o aluno digitou o valor do aparelho ou do relógio — a estimativa é calculada no app e nunca gravada). Um servidor antigo simplesmente ignora a chave: o cardio fica só no aparelho até a nova versão ser publicada.
 
 Abas novas:
 

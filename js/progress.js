@@ -1,6 +1,6 @@
 /* FORJA — evolução
    Tudo aqui é calculado a partir do histórico salvo — nada é digitado à mão nem inventado.
-   Rotas: #/progress · history · session/<id> · records · body · goals · achievements · balance
+   Rotas: #/progress · history · session/<id> · records · body · goals · achievements · balance · cardio (cardio.js)
    Gráficos: SVG feito à mão (sem bibliotecas). Uma série por gráfico → uma cor (--chart), sem legenda;
    linha 2px, área 10%, ponto final com anel; barras ≤ 24px com topo arredondado; grade em linha fina.
    Todo gráfico tem tooltip (toque/mouse/teclado) e uma tabela "Ver dados". */
@@ -49,6 +49,7 @@
     if (a === 'goals') return renderGoals(root);
     if (a === 'achievements') return renderAchievements(root);
     if (a === 'balance') return global.Balance.render(root);
+    if (a === 'cardio') return global.Cardio.render(root);
     return renderOverview(root);
   }
 
@@ -264,8 +265,9 @@
     const records = Statistics.filterByPeriod(allRecords, period, new Date(), 'date');
     const time = U.durationParts(t.durationSec);
     const bodyweight = Store.get('bodyweight');
-    const streak = Statistics.streakInfo(all);
-    const insights = Statistics.generateInsights(all, bodyweight);
+    const cardio = global.Cardio.all();
+    const streak = Statistics.streakInfo(all.concat(cardio));
+    const insights = Statistics.generateInsights(all, bodyweight, new Date(), { cardio });
     const empty = all.length === 0;
     const premium = global.Plans.isPremium();
 
@@ -308,6 +310,7 @@
 
         ${volumeSection(inPeriod, period)}
         ${frequencySection(inPeriod, period)}
+        ${global.Cardio.sectionHTML(period)}
         ${premium ? loadSection(all, period) : ''}
         ${bodySection(bodyweight, period)}
 
@@ -349,6 +352,12 @@
               <span class="row-value">${U.plural(all.length, 'treino', 'treinos')}</span>
               ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
             </button>
+            <button type="button" class="row" data-go="progress/cardio">
+              <span class="row-icon">${icon('heartPulse', { size: 20 })}</span>
+              <span class="row-main row-title">Cardio</span>
+              <span class="row-value">${U.plural(cardio.length, 'atividade', 'atividades')}</span>
+              ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
+            </button>
             <button type="button" class="row" data-go="progress/records">
               <span class="row-icon">${icon('trophy', { size: 20 })}</span>
               <span class="row-main row-title">Recordes por exercício</span>
@@ -360,8 +369,8 @@
       </section>`;
 
     if (empty) {
-      // Mesmo sem treinos, peso corporal e metas já podem ser usados
-      root.querySelector('.page').insertAdjacentHTML('beforeend', `${bodySection(bodyweight, 'all')}${premium ? goalsSection(all, bodyweight) : ''}`);
+      // Mesmo sem treinos, cardio, peso corporal e metas já podem ser usados
+      root.querySelector('.page').insertAdjacentHTML('beforeend', `${global.Cardio.sectionHTML('all')}${bodySection(bodyweight, 'all')}${premium ? goalsSection(all, bodyweight) : ''}`);
     }
 
     const slot = root.querySelector('[data-slot="period"]');
@@ -381,6 +390,7 @@
       if (e.target.closest('[data-pick-exercise]')) return pickExercise();
       if (e.target.closest('[data-add-weight]')) return openWeightSheet();
       if (e.target.closest('[data-new-goal]')) return openGoalForm();
+      if (e.target.closest('[data-cardio-new]')) return global.Cardio.openLog();
       const goal = e.target.closest('[data-goal]');
       if (goal) return openGoalMenu(goal.dataset.goal);
     });
@@ -539,8 +549,16 @@
   }
 
   /* ---------- Consistência: mapa dos últimos 12 meses ---------- */
+  // Cardio por dia: { 'AAAA-MM-DD': [registros] }
+  function cardioByDay() {
+    const map = new Map();
+    global.Cardio.all().forEach((c) => { const k = U.dayKey(c.startedAt); if (!map.has(k)) map.set(k, []); map.get(k).push(c); });
+    return map;
+  }
+
   function consistencySection(all) {
     const activity = Statistics.dailyActivity(all);
+    const cardio = cardioByDay();
     const end = U.startOfDay(new Date());
     const start = U.startOfWeek(U.addDays(end, -364));
     const vols = [...activity.values()].map((d) => d.volume).filter((v) => v > 0).sort((a, b) => a - b);
@@ -549,7 +567,7 @@
     const level = (d) => (!d ? 0 : d.volume <= t1 ? 1 : d.volume <= t2 ? 2 : d.volume <= t3 ? 3 : 4);
     const cols = [];
     for (let d = start; d <= end; d = U.addDays(d, 7)) cols.push(d);
-    const trainedDays = [...activity.keys()].filter((k) => new Date(`${k}T12:00:00`) >= U.addDays(end, -364)).length;
+    const trainedDays = [...new Set([...activity.keys(), ...cardio.keys()])].filter((k) => new Date(`${k}T12:00:00`) >= U.addDays(end, -364)).length;
 
     let prevMonth = -1;
     const months = cols.map((c, i) => {
@@ -564,9 +582,13 @@
       if (day > end) return '<span class="hm-cell is-future"></span>';
       const key = U.dayKey(day);
       const a = activity.get(key);
-      if (!a) return '<span class="hm-cell" data-level="0"></span>';
-      const label = `${U.fmtDayMonth(day)} · ${a.sessions.map((s) => s.name).join(', ')} · ${U.fmtVolume(a.volume)}`;
-      return `<button type="button" class="hm-cell" data-level="${level(a)}" data-day="${key}" aria-label="${esc(label)}" title="${esc(label)}"></button>`;
+      const cd = cardio.get(key);
+      if (!a && !cd) return '<span class="hm-cell" data-level="0"></span>';
+      const parts = [U.fmtDayMonth(day)];
+      if (a) parts.push(a.sessions.map((s) => s.name).join(', '), U.fmtVolume(a.volume));
+      if (cd) parts.push(`${cd.map((x) => global.Cardio.labelOf(x)).join(', ')} ${U.fmtDuration(cd.reduce((n, x) => n + (x.durationSec || 0), 0))}`);
+      const label = parts.join(' · ');
+      return `<button type="button" class="hm-cell" data-level="${a ? level(a) : 1}" data-day="${key}" aria-label="${esc(label)}" title="${esc(label)}"></button>`;
     }).join('')).join('');
 
     return `
@@ -586,7 +608,7 @@
           <div class="hm-legend" aria-hidden="true">
             <span>Menos</span>${[0, 1, 2, 3, 4].map((l) => `<i class="hm-cell" data-level="${l}"></i>`).join('')}<span>Mais</span>
           </div>
-          <p class="t-footnote mt-2">A cor mais forte indica mais volume no dia. Toque em um dia para ver o treino.</p>
+          <p class="t-footnote mt-2">A cor mais forte indica mais volume no dia. Dias só de cardio ficam no tom mais claro. Toque em um dia para ver o treino.</p>
         </div>
       </section>`;
   }
@@ -630,7 +652,9 @@
       const day = e.target.closest('[data-cal-day]');
       if (day) { state.pick = day.dataset.calDay; return paintCalendar(root, Sessions().all()); }
       const s = e.target.closest('[data-session]');
-      if (s) Router().go(`progress/session/${s.dataset.session}`);
+      if (s) return Router().go(`progress/session/${s.dataset.session}`);
+      const c = e.target.closest('[data-cal-cardio]');
+      if (c) { const entry = global.Cardio.get(c.dataset.calCardio); if (entry) global.Cardio.openLog(entry); }
     });
   }
 
@@ -638,6 +662,7 @@
     const el = root.querySelector('[data-cal]');
     if (!el) return;
     const activity = Statistics.dailyActivity(all);
+    const cardio = cardioByDay();
     const today = new Date();
     const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     if (!state.month) state.month = thisMonth;
@@ -651,13 +676,15 @@
     for (let d = 1; d <= daysIn; d++) {
       const key = U.dayKey(new Date(m.getFullYear(), m.getMonth(), d));
       const a = activity.get(key);
-      if (a) trained.push(key);
-      const cls = `cal-day${a ? ' has' : ''}${key === todayKey ? ' is-today' : ''}${key === state.pick ? ' is-picked' : ''}`;
-      cells.push(a
-        ? `<button type="button" class="${cls}" data-cal-day="${key}" aria-label="${d}: ${esc(a.sessions.map((s) => s.name).join(', '))}"><span class="num">${d}</span><i></i></button>`
+      const c = cardio.get(key);
+      if (a || c) trained.push(key);
+      const names = (a ? a.sessions.map((s) => s.name) : []).concat(c ? c.map((x) => global.Cardio.labelOf(x)) : []);
+      const cls = `cal-day${a || c ? ' has' : ''}${!a && c ? ' is-cardio' : ''}${key === todayKey ? ' is-today' : ''}${key === state.pick ? ' is-picked' : ''}`;
+      cells.push(a || c
+        ? `<button type="button" class="${cls}" data-cal-day="${key}" aria-label="${d}: ${esc(names.join(', '))}"><span class="num">${d}</span><i></i></button>`
         : `<span class="${cls}"><span class="num">${d}</span></span>`);
     }
-    const picked = state.pick && activity.get(state.pick);
+    const picked = state.pick && (activity.get(state.pick) || cardio.get(state.pick)) ? { sessions: (activity.get(state.pick) || { sessions: [] }).sessions, cardio: cardio.get(state.pick) || [] } : null;
     el.innerHTML = `
       <div class="cal-head">
         <button type="button" class="icon-btn is-plain" data-cal-nav="-1" aria-label="Mês anterior">${icon('chevronLeft', { size: 20, stroke: 2 })}</button>
@@ -674,6 +701,13 @@
               <span class="t-eyebrow">${U.fmtDayMonth(s.startedAt)}</span>
               <span class="cal-session-name">${esc(s.name)}</span>
               <span class="cal-session-meta num">${U.fmtDuration(s.durationSec)} · ${U.fmtVolume(Statistics.sessionVolume(s))} · ${U.plural((s.exercises || []).length, 'exercício', 'exercícios')}</span>
+              ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
+            </button>`).join('')}
+          ${picked.cardio.map((c) => `
+            <button type="button" class="cal-session is-cardio" data-cal-cardio="${esc(c.id)}">
+              <span class="t-eyebrow">${U.fmtDayMonth(c.startedAt)} · Cardio</span>
+              <span class="cal-session-name">${esc(global.Cardio.labelOf(c))}</span>
+              <span class="cal-session-meta num">${esc(global.Cardio.metaText(c))}</span>
               ${icon('chevronRight', { size: 16, stroke: 2, cls: 'row-chevron' })}
             </button>`).join('')}
         </div>` : ''}`;
@@ -882,7 +916,7 @@
 
   /* ---------- Conquistas ---------- */
   function achievements(sessions = Sessions().all()) {
-    return Statistics.evaluateAchievements(sessions, { bodyweight: Store.get('bodyweight'), profile: Store.get('profile') });
+    return Statistics.evaluateAchievements(sessions, { bodyweight: Store.get('bodyweight'), profile: Store.get('profile'), cardio: global.Cardio.all() });
   }
 
   function badgeSub(a) {
@@ -1085,28 +1119,35 @@
      ========================================================================== */
   function renderHistory(root) {
     const all = Sessions().all();
+    const cardio = global.Cardio.all();
     const prBySession = new Map();
     Statistics.groupRecords(Statistics.calculatePersonalRecords(all)).forEach((g) => prBySession.set(g.sessionId, (prBySession.get(g.sessionId) || 0) + 1));
 
+    // Treinos e cardio na mesma linha do tempo
+    const timeline = all.map((s) => ({ kind: 'session', at: s.startedAt, item: s }))
+      .concat(cardio.map((c) => ({ kind: 'cardio', at: c.startedAt, item: c })))
+      .sort((a, b) => new Date(b.at) - new Date(a.at));
     const groups = [];
-    all.forEach((s) => {
-      const label = U.fmtMonthYear(s.startedAt);
+    timeline.forEach((x) => {
+      const label = U.fmtMonthYear(x.at);
       let g = groups[groups.length - 1];
       if (!g || g.label !== label) { g = { label, items: [] }; groups.push(g); }
-      g.items.push(s);
+      g.items.push(x);
     });
 
     root.innerHTML = `
       ${UI.navbarHTML('Histórico', 'Evolução')}
       <section class="page has-navbar">
         <h1 class="t-large-title mt-2" data-large-title>Histórico</h1>
-        <p class="t-sub mt-2">${U.plural(all.length, 'treino concluído', 'treinos concluídos')}</p>
+        <p class="t-sub mt-2">${U.plural(all.length, 'treino concluído', 'treinos concluídos')}${cardio.length ? ` · ${U.plural(cardio.length, 'cardio', 'cardios')}` : ''}</p>
 
-        ${all.length ? groups.map((g) => `
+        ${timeline.length ? groups.map((g) => `
           <section class="list-section mt-8">
             <p class="t-eyebrow group-label">${g.label}</p>
             <div class="group">
-              ${g.items.map((s) => {
+              ${g.items.map((x) => {
+                if (x.kind === 'cardio') return global.Cardio.rowHTML(x.item, { tag: true });
+                const s = x.item;
                 const d = new Date(s.startedAt);
                 const vol = Statistics.sessionVolume(s);
                 const sets = Statistics.workingSets(s).length;
@@ -1134,6 +1175,7 @@
           </div>`}
       </section>`;
     bindCommon(root);
+    global.Cardio.bindRows(root);
   }
 
   /* ==========================================================================
@@ -1312,5 +1354,8 @@
     });
   }
 
-  global.Progress = { renderScreen, celebrate, achievements, openWeightSheet, openGoalForm };
+  // Peças dos gráficos, reaproveitadas pela tela de cardio
+  const kit = { Charts, PERIODS, PERIOD_TEXT, GRAN_TEXT, CURRENT_TEXT, bucketLabel, bucketTip };
+
+  global.Progress = { renderScreen, celebrate, achievements, openWeightSheet, openGoalForm, kit };
 })(window);

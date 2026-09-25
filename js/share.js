@@ -61,7 +61,7 @@
       durationSec: session.durationSec || 0,
       exercises,
       records: records.length,
-      streak: Statistics.streakInfo(all).days,
+      streak: Statistics.streakInfo(all.concat(global.Cardio ? global.Cardio.all() : [])).days,
       headline: records.length ? (records.length === 1 ? 'Novo recorde.' : `${records.length} novos recordes.`)
         : bestVolume ? 'Maior volume até hoje.'
         : 'Treino concluído.'

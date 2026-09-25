@@ -20,8 +20,8 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="css/style.css?v=20260924d">
-  <link rel="stylesheet" href="css/base.css?v=20260924d">
+  <link rel="stylesheet" href="css/style.css?v=20260924f">
+  <link rel="stylesheet" href="css/base.css?v=20260924f">
 </head>
 <body>
   <!--
@@ -47,6 +47,7 @@
       <li><b>Conta:</b> nome, e-mail e senha. A senha nunca é guardada: guardamos só uma versão cifrada e irreversível dela (<i>hash</i>).</li>
       <li><b>Perfil e corpo (opcionais):</b> peso, altura, data de nascimento ou idade, objetivo e nível de experiência, e o histórico do seu peso.</li>
       <li><b>Treinos:</b> treinos que você cria, exercícios, séries, repetições, cargas, duração, recordes, metas, programa em andamento, lembretes e preferências do app.</li>
+      <li><b>Cardio:</b> as atividades que você registra (tipo, data, duração, distância, calorias, esforço e observações).</li>
       <li><b>Academia e Premium:</b> o código da academia que você usou, a data de entrada e de saída, códigos Premium resgatados e assinaturas registradas.</li>
       <li><b>Dados técnicos da conta:</b> data de criação, último acesso, confirmação do e-mail e o registro de que você aceitou estes termos (data e versão).</li>
     </ul>
@@ -55,7 +56,7 @@
     <h2>3. Para que usamos e com qual base legal</h2>
     <ul>
       <li><b>Criar e manter sua conta</b>, permitir o login, confirmar seu e-mail e recuperar sua senha: execução do contrato com você (art. 7º, V, da LGPD).</li>
-      <li><b>Guardar e sincronizar seus treinos</b> e mostrar sua evolução: execução do contrato (art. 7º, V).</li>
+      <li><b>Guardar e sincronizar seus treinos e seu cardio</b> e mostrar sua evolução: execução do contrato (art. 7º, V). As calorias do cardio, quando você não digita o valor, são uma estimativa calculada no próprio app com o tipo de atividade, o ritmo ou esforço e o seu peso.</li>
       <li><b>Dados do corpo</b> (peso, altura e idade) servem para calcular o IMC e acompanhar sua evolução. Como são dados ligados à saúde, só os tratamos com o seu consentimento (art. 11, I), que você dá ao informá-los no app. Eles são opcionais, e você pode apagá-los quando quiser.</li>
       <li><b>Liberar funções do seu plano</b> (Free ou Premium) e, se você entrar numa academia, <b>compartilhar seus dados com ela</b> (veja o item 4): execução do contrato.</li>
       <li><b>Enviar e-mails sobre a sua conta</b> (confirmação de e-mail e nova senha). Não enviamos propaganda sem a sua autorização.</li>
@@ -65,7 +66,7 @@
 
     <h2>4. Com quem compartilhamos</h2>
     <ul>
-      <li><b>Sua academia, somente se você entrar com o código dela.</b> Os treinadores e gestores dessa academia passam a ver seu nome, e-mail, idade, peso, altura, IMC e histórico de peso, seus treinos e um resumo dos treinos que você fez (data, duração, exercícios e séries), e podem criar e alterar treinos para você. Quando você sai da academia (ou ela encerra o vínculo), esse acesso termina.</li>
+      <li><b>Sua academia, somente se você entrar com o código dela.</b> Os treinadores e gestores dessa academia passam a ver seu nome, e-mail, idade, peso, altura, IMC e histórico de peso, seus treinos e o histórico dos treinos que você fez (data, duração, exercícios, séries, cargas, repetições e o esforço que você marcou) e das suas atividades de cardio (tipo, data, duração, distância e esforço), para acompanhar sua evolução, e podem criar e alterar treinos para você. As anotações e o humor que você registra ao terminar um treino, e as observações do cardio, <b>não</b> são mostrados à academia. Quando você sai da academia (ou ela encerra o vínculo), esse acesso termina.</li>
       <li><b>Prestadores de serviço</b> que tratam os dados em nosso nome: o <b>Google</b>, onde os dados ficam guardados (Google Planilhas e Google Drive) e de onde saem os e-mails (Google Apps Script), e o <b>GitHub</b>, que hospeda o site do app.</li>
       <li><b>Autoridades</b>, quando a lei exigir.</li>
     </ul>
@@ -85,7 +86,7 @@
 
     <h2>7. Seus direitos</h2>
     <p>Pela LGPD (art. 18), você pode pedir: confirmação de que tratamos seus dados e acesso a eles; correção de dados incompletos ou errados; anonimização, bloqueio ou eliminação de dados desnecessários; portabilidade; informação sobre com quem compartilhamos; e revogação do consentimento, entre outros.</p>
-    <p>Boa parte disso você faz direto no app: editar seus dados no Perfil, sair da academia, <b>Apagar todos os dados</b> e <b>Excluir minha conta</b>. Para o resto, escreva para <a href="mailto:privacidade@forja.example">privacidade@forja.example</a><!-- PENDENTE: e-mail provisório -->. Respondemos em até 15 dias. Você também pode reclamar à Autoridade Nacional de Proteção de Dados (ANPD), em gov.br/anpd.</p>
+    <p>Boa parte disso você faz direto no app: editar seus dados no Perfil, sair da academia, <b>Baixar meus dados</b> (Perfil › Dados: uma cópia completa em arquivo JSON e uma planilha dos treinos e do cardio), <b>Apagar todos os dados</b> e <b>Excluir minha conta</b>. Para o resto, escreva para <a href="mailto:privacidade@forja.example">privacidade@forja.example</a><!-- PENDENTE: e-mail provisório -->. Respondemos em até 15 dias. Você também pode reclamar à Autoridade Nacional de Proteção de Dados (ANPD), em gov.br/anpd.</p>
 
     <h2>8. Segurança</h2>
     <ul>
